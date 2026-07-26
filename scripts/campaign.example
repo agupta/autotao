@@ -1,0 +1,59 @@
+# Campaign descriptor — copy next to a campaign's artifacts as <name>.campaign
+# and the supervision console picks it up automatically. The console has zero
+# problem-specific knowledge; this file is the only place a problem is named.
+#
+# Discovery glob: attempts/*/run/*.campaign   (override with CAMPAIGN_GLOB)
+# All paths are relative to THIS FILE's directory.
+# Delete the descriptor when a campaign is finished and archived — that is how
+# you take it off the dashboard.
+
+label=Human readable name          # shown in the CAMPAIGNS column
+order=50                           # sort key, ascending (10 = top of list)
+kind=segments                      # segments | logmatch | value | text
+unit=                              # optional prefix on the counts, e.g. $
+
+# --- kind=logmatch: pull done/total out of a babysitter log -----------------
+# Takes the NEWEST line of <log> containing <match>, then applies <extract>,
+# an ERE whose two capture groups are (done, total). This is the right kind for
+# any remote/cloud campaign whose babysitter already prints progress. Example,
+# against "[babysit-fleet ...] FLEET total done=82/4096":
+#   kind=logmatch
+#   log=cloud-results/babysit.log
+#   match=FLEET total
+#   extract=done=([0-9]+)/([0-9]+)
+# Spend against a ceiling works the same way — "SPEND campaign=$14.80/$250":
+#   match=SPEND
+#   extract=campaign=\$([0-9.]+)/\$([0-9]+)
+#   unit=$
+# NOTE: '@' is the sed delimiter, so an extract pattern may not contain '@'.
+
+# --- kind=value: a file holding a single number -----------------------------
+# value_file=cloud-results/babysit-state
+# total=250                        # denominator; defaults to 100
+# CAUTION: check what the file actually holds. babysit-fleet.sh's babysit-state
+# is dollars spent, not a percentage — reading it as a percent silently shows
+# a wrong number rather than failing.
+
+# --- kind=segments: parallel sweep writing 'total=' checkpoints -------------
+# Progress = sum of the newest terminal line across all matching segments.
+# Reads final_tag from <seg>.out if present, else ckpt_tag from <seg>.err.
+glob=shard_k*_s*.out
+ckpt_tag=CHKPT
+final_tag=SWEEP-FINAL
+total=33823827452                  # denominator for the progress bar
+count_glob=open_k*.txt         # optional: secondary counter (line count)
+count_label=open so far
+log=driver.log                     # optional: tailed while no segments exist yet
+
+# --- kind=percent: a file containing just a percentage ----------------------
+# pct_file=cloud-results/babysit-state
+
+# --- kind=text: no progress bar, just tail a log ----------------------------
+# log=driver.log
+
+# --- completion (all kinds) -------------------------------------------------
+done_marker=campaign_end.ts             # if this file exists, campaign renders DONE
+done_note=free text shown when done
+# ...or pull the summary out of a results file instead:
+# done_file=TOTALS.txt
+# done_grep=GRAND

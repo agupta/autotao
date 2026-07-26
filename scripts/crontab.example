@@ -1,0 +1,23 @@
+# autotao autonomous loop — durable system-cron version.
+# NOT INSTALLED as of 2026-07-24: the operator prefers the foreground supervision
+# console (scripts/supervise-console.sh in tmux, AUTO_LAUNCH=1) as the sole
+# maintainer of runs — it shows live progress and does the same gated
+# launches. Keep this file only as the fallback recipe if the console stops
+# being used.
+# Install by appending to your crontab (preserves existing entries):
+#   (crontab -l 2>/dev/null; grep -v '^#' /path/to/autotao/scripts/crontab.example) | crontab -
+# Budgets are NOT set here any more. These lines used to carry their own copy
+# (`should-run.sh 80 97 15`) — a fourth independent set of ceilings, weekly 97
+# against the console's 90 — which is the drift that killed three runs on
+# 2026-07-26. should-run.sh now REJECTS positional budget args; edit
+# scripts/budgets.conf, which every caller reads.
+#
+# Launch only via scripts/launch.sh: it runs the gate and the watchdog preflight
+# synchronously, detaches the run itself, and returns a real exit code
+# (0 launched · 1 usage · 2 memory · 3 unknown · 4 already running).
+41 0,3,6,9,12,15,18,21 * * * cd /path/to/autotao && bash scripts/launch.sh
+41 5,11,17,23 * * * cd /path/to/autotao && bash scripts/should-run.sh && bash scripts/run-once.sh codex
+# Tiered babysitter (scripts/supervisor-tick.sh): free bash health checks every 15
+# min; spawns haiku to settle a finished run's books, fable/opus only on real
+# breakage (crash streaks, hung runs). Safe alongside the launch lines above.
+*/15 * * * * cd /path/to/autotao && bash scripts/supervisor-tick.sh

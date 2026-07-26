@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+nohup.out
+.venv/
+.claude/settings.local.json
+attempts/.run.lock
+
+# Raw agent logs: large, and they contain whatever the run happened to print.
+# Keep them locally (the triage tier reads them); never publish them.
+attempts/raw-logs/*.log
+attempts/raw-logs/*.jsonl
+
+# Supervision scratch state.
+attempts/supervision/*
+!attempts/supervision/.gitkeep
+
+# Paper cache: binaries and extracted text stay local (size + copyright).
+# Metadata (papers/INDEX.tsv, papers/WANTED.md) is tracked so the record of what
+# was fetched — and what is still missing — survives in git.
+papers/*.pdf
+papers/*.txt
+papers/*.notpdf
+papers/.*.err
+
+# Bulk search output from attempts. Preserved on disk per the never-delete rule,
+# but must never enter git history — one crashed run wrote 397MB of these.
+attempts/**/*.out
+attempts/**/s_all_*.txt
