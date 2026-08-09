@@ -107,11 +107,11 @@ function UsagePlan(props: { snapshot: ProjectSnapshot; width: number }) {
   )
 }
 
-function NowPanel(props: { snapshot: ProjectSnapshot; wide: boolean }) {
+function NowPanel(props: { snapshot: ProjectSnapshot; wide: boolean; sideBySide: boolean }) {
   const running = () => props.snapshot.run.phase === "running"
   const latestEvent = () => props.snapshot.pipeline.at(-1)?.message
   return (
-    <Panel title="NOW" accent={running() ? theme.sage : theme.border} style={props.wide ? { width: "38%", flexGrow: 0 } : { width: "100%", height: 4, flexShrink: 0 }}>
+    <Panel title="NOW" accent={running() ? theme.sage : theme.border} style={props.sideBySide ? { width: "38%", flexGrow: 0 } : { width: "100%", height: 4, flexShrink: 0 }}>
       <text fg={running() ? theme.sage : theme.paper}>
         <strong>{running() ? "Working on mathematics" : "Waiting for the runway"}</strong>
       </text>
@@ -122,7 +122,7 @@ function NowPanel(props: { snapshot: ProjectSnapshot; wide: boolean }) {
         <text fg={theme.quiet}>AutoTao checks again automatically.</text>
       </Show>
       <Show when={props.wide && latestEvent()}>
-        {(event) => <text fg={theme.quiet}>{truncate(event(), 48)}</text>}
+        {(event) => <text fg={theme.quiet} wrapMode="word">{event()}</text>}
       </Show>
       <Show when={props.wide && props.snapshot.run.newestLog}>
         <text fg={theme.reserve}>{truncate(props.snapshot.run.newestLog ?? "", props.wide ? 44 : 24)} · {bytes(props.snapshot.run.newestLogBytes)}</text>
@@ -131,22 +131,33 @@ function NowPanel(props: { snapshot: ProjectSnapshot; wide: boolean }) {
   )
 }
 
-function LastAttemptPanel(props: { snapshot: ProjectSnapshot; wide: boolean }) {
+function LastAttemptPanel(props: { snapshot: ProjectSnapshot; wide: boolean; sideBySide: boolean; width: number }) {
   const verdict = () => props.snapshot.ledger?.verdict.toLowerCase() ?? ""
   const verdictColor = () => /resolved|pass|partial|closed/.test(verdict()) ? theme.sage : /fail|invalid/.test(verdict()) ? theme.coral : theme.brass
+  const textWidth = () => Math.max(20, props.sideBySide ? Math.floor(props.width * 0.62) - 7 : props.width - 6)
+  const outcomeHeadline = (value: string) => {
+    const bold = /\*\*([^*]+)\*\*/.exec(value)?.[1]
+    const sentence = bold ?? value.split(/(?<=[.!?])\s/, 1)[0] ?? value
+    return sentence.replace(/[`*_]/g, "").trim()
+  }
   return (
-    <Panel title="LAST MATH ATTEMPT" accent={verdictColor()} style={props.wide ? { flexGrow: 1 } : { width: "100%", height: 5, flexShrink: 0 }}>
+    <Panel title="LAST MATH ATTEMPT" accent={verdictColor()} style={props.sideBySide ? { flexGrow: 1 } : { width: "100%", flexGrow: 1 }}>
       <Show when={props.snapshot.ledger} fallback={
         <text fg={theme.quiet}>No attempt yet. Add a problem, then AutoTao can begin.</text>
       }>
         {(ledger) => (
           <box flexDirection="column">
-            <box flexDirection="row" justifyContent="space-between">
-              <text fg={theme.paper}><strong>{truncate(ledger().problem, props.wide ? 42 : 26)}</strong></text>
+            <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
+              <text fg={theme.paper}><strong>{ledger().problem}</strong></text>
               <text fg={verdictColor()}>{ledger().verdict.toUpperCase()}</text>
             </box>
-            <text fg={theme.quiet}>{truncate(ledger().target, props.wide ? 76 : 38)}</text>
-            <Show when={props.wide}><text fg={theme.reserve}>{truncate(ledger().outcome, 84)}</text></Show>
+            <text
+              height={wrapParagraph(ledger().target, textWidth()).length}
+              flexShrink={0}
+              fg={theme.quiet}
+            >{wrapParagraph(ledger().target, textWidth()).join("\n")}</text>
+            <text height={1} flexShrink={0} fg={theme.reserve}>{outcomeHeadline(ledger().outcome)}</text>
+            <text height={1} flexShrink={0} fg={theme.sky}>Enter opens the complete work transcript</text>
           </box>
         )}
       </Show>
@@ -158,11 +169,11 @@ function HelpPanel(props: { snapshot: ProjectSnapshot }) {
   const finishAt = () => usageRunway(props.snapshot.gate).primary?.tank.finishAt ?? 95
   return (
     <Panel title="HOW AUTOTAO DECIDES" accent={theme.brass} style={{ flexGrow: 1 }}>
-      <text fg={theme.paper}>Autopilot follows a steady path to {Math.round(finishAt())}% when your allowance resets.</text>
-      <text fg={theme.quiet}>Your normal usage counts toward the path. AutoTao starts work only when a checked run fits below it.</text>
-      <text fg={theme.quiet}>Every run still rechecks usage, memory, and whether another run is active.</text>
-      <text fg={theme.brass}>Enter opens live work · s browses past sessions · Space pauses/resumes · n starts one checked run</text>
-      <text fg={theme.quiet}>r refreshes · t runs maintenance · ? closes help</text>
+      <text fg={theme.paper}>Autopilot follows a steady path to {Math.round(finishAt())}% by reset.</text>
+      <text fg={theme.quiet}>Your normal usage counts; AutoTao fills only the gap.</text>
+      <text fg={theme.quiet}>Each run rechecks usage, memory, and the active-run lock.</text>
+      <text fg={theme.brass}>Enter live work · s past sessions · Space pause/resume</text>
+      <text fg={theme.quiet}>n run now · r refresh · t maintenance · ? close help</text>
     </Panel>
   )
 }
@@ -175,6 +186,7 @@ export function Dashboard(props: {
   help?: boolean
 }) {
   const wide = () => props.width >= 108
+  const sideBySide = () => props.width >= 76
   const active = () => props.autoLaunch ?? false
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.canvas} padding={1} gap={1}>
@@ -202,20 +214,25 @@ export function Dashboard(props: {
 
       <UsagePlan snapshot={props.snapshot} width={props.width} />
 
-      <box height={wide() ? 8 : 10} flexShrink={0} flexDirection={wide() ? "row" : "column"} gap={1}>
+      <box minHeight={8} flexGrow={1} flexDirection={sideBySide() ? "row" : "column"} gap={1}>
         <Show when={!props.help} fallback={<HelpPanel snapshot={props.snapshot} />}>
-          <NowPanel snapshot={props.snapshot} wide={wide()} />
-          <LastAttemptPanel snapshot={props.snapshot} wide={wide()} />
+          <NowPanel snapshot={props.snapshot} wide={wide()} sideBySide={sideBySide()} />
+          <LastAttemptPanel snapshot={props.snapshot} wide={wide()} sideBySide={sideBySide()} width={props.width} />
         </Show>
       </box>
 
-      <box flexGrow={1} />
+      <box height={1} flexShrink={0} paddingX={1}>
+        <Show when={props.message} fallback={<text> </text>}>
+          {(message) => (
+            <text fg={message().ok ? theme.sage : theme.coral}>
+              <strong>{message().ok ? "✓" : "!"}</strong> {truncate(message().summary, Math.max(20, props.width - 6))}
+            </text>
+          )}
+        </Show>
+      </box>
 
       <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between" paddingX={1}>
         <text fg={theme.paper}>{wide() ? "Enter  Live work   s  Sessions   Space  Pause   n  Run now   ?  Help   q  Quit" : "Enter live work · s sessions · Space pause · n run now · ? help"}</text>
-        <Show when={props.message}>
-          {(message) => <text fg={message().ok ? theme.sage : theme.coral}>{truncate(message().summary, wide() ? 34 : 18)}</text>}
-        </Show>
       </box>
     </box>
   )
@@ -372,6 +389,15 @@ export function App(props: AppProps) {
   createEffect(() => {
     if (follow()) setTranscriptOffset(maxTranscriptOffset())
     else setTranscriptOffset((value) => Math.min(value, maxTranscriptOffset()))
+  })
+
+  createEffect(() => {
+    const current = message()
+    if (!current?.ok) return
+    const timer = setTimeout(() => {
+      if (message() === current) setMessage(null)
+    }, 5_000)
+    onCleanup(() => clearTimeout(timer))
   })
 
   const refresh = (): Promise<void> => {

@@ -27,6 +27,11 @@ All notable software changes to AutoTao are recorded here. Mathematical work bel
 - The OpenTUI console is the foreground supervisor; the former Bash renderer is now a thin
   compatibility entry point.
 - Campaign descriptors and campaign state are intentionally absent from the new protocol and UI.
+- Action feedback uses a dedicated status row; successful notices clear after five seconds,
+  while errors remain visible until the next action.
+- Primary mathematical targets wrap into the available dashboard space instead of being
+  shortened to arbitrary character counts; long outcomes use a clear headline and point to
+  the complete work transcript.
 
 ### Removed
 

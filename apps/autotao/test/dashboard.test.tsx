@@ -100,7 +100,39 @@ describe("dashboard layout", () => {
 
     expect(frame).toContain("HOW AUTOTAO DECIDES")
     expect(frame).toContain("normal usage counts")
-    expect(frame).toContain("Space pauses/resumes")
+    expect(frame).toContain("Space pause/resume")
+  })
+
+  test("gives action feedback its own unclipped status row", async () => {
+    setup = await testRender(() => (
+      <Dashboard
+        snapshot={snapshot}
+        width={80}
+        autoLaunch
+        message={{ ok: true, summary: "Maintenance finished", output: "" }}
+      />
+    ), { width: 80, height: 24 })
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+
+    expect(frame).toContain("✓ Maintenance finished")
+    expect(frame).toContain("Enter live work")
+    expect(frame).not.toContain("Maintenance finis…")
+  })
+
+  test("wraps the complete mathematical target instead of ellipsizing it", async () => {
+    const longTarget = "T1 ACTIVE: prove the exact B(N) bound for every admissible integer without an asymptotic escape hatch"
+    const completeSnapshot: ProjectSnapshot = {
+      ...snapshot,
+      ledger: { ...snapshot.ledger!, target: longTarget, outcome: "Hostile verification remains in progress." },
+    }
+    setup = await testRender(() => <Dashboard snapshot={completeSnapshot} width={80} autoLaunch />, { width: 80, height: 24 })
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+
+    expect(frame).toContain("every admissible integer without an")
+    expect(frame).toContain("asymptotic escape hatch")
+    expect(frame).not.toContain("T1 ACTIVE: prove the exact B(N) bou…")
   })
 
   test("browses current and historical sessions", async () => {
