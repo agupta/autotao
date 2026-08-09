@@ -188,6 +188,7 @@ export function Dashboard(props: {
   const wide = () => props.width >= 108
   const sideBySide = () => props.width >= 76
   const active = () => props.autoLaunch ?? false
+  const showProjectName = () => props.snapshot.project.name.trim().toLowerCase() !== "autotao"
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.canvas} padding={1} gap={1}>
       <box
@@ -204,7 +205,7 @@ export function Dashboard(props: {
       >
         <box flexDirection="row" gap={1}>
           <text fg={theme.sky}><strong>◆ AUTOTAO</strong></text>
-          <text fg={theme.paper}>{props.snapshot.project.name}</text>
+          <Show when={showProjectName()}><text fg={theme.paper}>{props.snapshot.project.name}</text></Show>
         </box>
         <box flexDirection="row" gap={1}>
           <text fg={active() ? theme.sage : theme.brass}>● {active() ? "AUTOPILOT ON" : "AUTOPILOT PAUSED"}</text>

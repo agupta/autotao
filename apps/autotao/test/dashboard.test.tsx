@@ -135,6 +135,19 @@ describe("dashboard layout", () => {
     expect(frame).not.toContain("T1 ACTIVE: prove the exact B(N) bou…")
   })
 
+  test("does not repeat the AutoTao name for the native workspace", async () => {
+    const nativeSnapshot: ProjectSnapshot = {
+      ...snapshot,
+      project: { ...snapshot.project, name: "autotao", adapter: "autotao" },
+    }
+    setup = await testRender(() => <Dashboard snapshot={nativeSnapshot} width={80} autoLaunch />, { width: 80, height: 24 })
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+
+    expect(frame).toContain("◆ AUTOTAO")
+    expect(frame).not.toMatch(/AUTOTAO\s+autotao/i)
+  })
+
   test("browses current and historical sessions", async () => {
     const sessions: SessionSummary[] = [
       { id: "20260809-043858-codex-loop.log", modifiedAt: "2026-08-09T03:05:00.000Z", bytes: 1_500_000, engine: "codex", active: true },

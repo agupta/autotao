@@ -34,6 +34,8 @@ All notable software changes to AutoTao are recorded here. Mathematical work bel
 - Primary mathematical targets wrap into the available dashboard space instead of being
   shortened to arbitrary character counts; long outcomes use a clear headline and point to
   the complete work transcript.
+- The dashboard suppresses a redundant project label when the native workspace is itself
+  named AutoTao.
 
 ### Removed
 
