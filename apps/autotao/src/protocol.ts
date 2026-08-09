@@ -110,9 +110,33 @@ export interface ActionResult {
   output: string
 }
 
+export type TranscriptLineKind = "agent" | "command" | "output" | "file" | "status" | "error" | "tool"
+
+export interface TranscriptLine {
+  kind: TranscriptLineKind
+  text: string
+}
+
+export interface SessionSummary {
+  id: string
+  modifiedAt: string
+  bytes: number
+  engine: string
+  active: boolean
+}
+
+export interface SessionTranscript {
+  session: SessionSummary
+  threadId: string | null
+  truncated: boolean
+  lines: TranscriptLine[]
+}
+
 export interface AutoTaoController {
   snapshot(): Promise<ProjectSnapshot>
   importState(): Promise<AutoTaoState>
+  listSessions(): Promise<SessionSummary[]>
+  readSession(id: string): Promise<SessionTranscript>
   launch(): Promise<ActionResult>
   tick(): Promise<ActionResult>
 }

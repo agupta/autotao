@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import type { TestRendererSetup } from "@opentui/core/testing"
-import { Dashboard } from "../src/app.tsx"
-import type { ProjectSnapshot } from "../src/protocol.ts"
+import { Dashboard, SessionBrowser, TranscriptView, formatTranscriptRows } from "../src/app.tsx"
+import type { ProjectSnapshot, SessionSummary, SessionTranscript } from "../src/protocol.ts"
 
 const snapshot: ProjectSnapshot = {
   schemaVersion: 1,
@@ -87,6 +87,8 @@ describe("dashboard layout", () => {
     expect(frame).toContain("LAST MATH ATTEMPT")
     expect(frame).toContain("sample-problem")
     expect(frame.toLowerCase()).toMatch(/run (one )?now/)
+    expect(frame).toMatch(/live work/i)
+    expect(frame).toMatch(/sessions/i)
     expect(frame).toContain("95%")
     expect(frame).not.toContain("CAMPAIGN")
   })
@@ -99,5 +101,42 @@ describe("dashboard layout", () => {
     expect(frame).toContain("HOW AUTOTAO DECIDES")
     expect(frame).toContain("normal usage counts")
     expect(frame).toContain("Space pauses/resumes")
+  })
+
+  test("browses current and historical sessions", async () => {
+    const sessions: SessionSummary[] = [
+      { id: "20260809-043858-codex-loop.log", modifiedAt: "2026-08-09T03:05:00.000Z", bytes: 1_500_000, engine: "codex", active: true },
+      { id: "20260807-223019-claude-loop.log", modifiedAt: "2026-08-07T22:45:00.000Z", bytes: 900_000, engine: "claude", active: false },
+    ]
+    setup = await testRender(() => <SessionBrowser sessions={sessions} selected={0} width={100} height={24} />, { width: 100, height: 24 })
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+
+    expect(frame).toContain("SESSION HISTORY")
+    expect(frame).toContain("LIVE")
+    expect(frame).toContain("DONE")
+    expect(frame).toContain("Enter open")
+  })
+
+  test("renders a readable scrollable work transcript", async () => {
+    const transcript: SessionTranscript = {
+      session: { id: "20260809-043858-codex-loop.log", modifiedAt: "2026-08-09T03:05:00.000Z", bytes: 1_500_000, engine: "codex", active: true },
+      threadId: "thread-123",
+      truncated: false,
+      lines: [
+        { kind: "agent", text: "A verified fragment is ready for hostile audit." },
+        { kind: "command", text: "uv run python verify/check.py" },
+        { kind: "output", text: "ALL CHECKS PASSED" },
+      ],
+    }
+    const rows = formatTranscriptRows(transcript.lines, 90)
+    setup = await testRender(() => <TranscriptView transcript={transcript} rows={rows} offset={0} pageSize={10} follow />, { width: 100, height: 24 })
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+
+    expect(frame).toContain("LIVE WORK")
+    expect(frame).toContain("A verified fragment")
+    expect(frame).toContain("ALL CHECKS PASSED")
+    expect(frame).toContain("↑↓/Pg scroll")
   })
 })

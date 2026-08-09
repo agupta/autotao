@@ -23,9 +23,17 @@ Engine selection is explicit (`engine: "claude" | "codex"`) and is passed to
 every status, launch, and supervisor command. It therefore survives terminal and tmux
 restarts instead of depending on an inherited shell environment.
 
-The persistent controls use plain-language actions: `Space` pauses or resumes autopilot,
-`n` starts one checked run, `?` explains the screen, and `q` quits. Refresh (`r`) and a
-manual maintenance tick (`t`) remain available from the help view.
+The persistent controls use plain-language actions: `Enter` follows the current run's
+readable work transcript, `s` browses current and past sessions, `Space` pauses or resumes
+autopilot, `n` starts one checked run, `?` explains the screen, and `q` quits. In a
+transcript, arrows and Page Up/Down scroll, Home/End jump, and `f` toggles live follow.
+Refresh (`r`) and a manual maintenance tick (`t`) remain available from the help view.
+
+Session history is read lazily from the project's existing `attempts/raw-logs/` files.
+It is not copied into `.autotao/state.json`, the mathematical ledger, the package, or a
+release artifact. The browser presents agent messages and observable activity—commands,
+outputs, file changes, tools, and verification results—and intentionally omits internal
+reasoning payloads. Individual logs larger than 16 MB open at their newest 16 MB.
 
 ## Development
 

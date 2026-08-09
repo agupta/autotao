@@ -175,9 +175,12 @@ both leaving a large allowance unused and burning the whole week on day one.
 ```
 
 Set `pace` to `eager` to use available headroom immediately. Every run still passes the
-existing usage, memory, and one-run-at-a-time gates. Press `Space` to pause/resume
-autopilot, `n` to ask for one checked run now, `?` for an explanation, and `q` to quit.
-`bash scripts/supervise-console.sh` remains a compatibility entry point to the same app.
+existing usage, memory, and one-run-at-a-time gates. Press `Enter` to follow the current
+run's readable work transcript, or `s` to browse current and past sessions. Transcript
+views support arrows, Page Up/Down, Home/End, and live-follow mode. Press `Space` to
+pause/resume autopilot, `n` to ask for one checked run now, `?` for an explanation, and
+`q` to quit. `bash scripts/supervise-console.sh` remains a compatibility entry point to
+the same app.
 
 Existing installations can perform a one-time import of durable legacy-console state:
 

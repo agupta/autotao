@@ -17,6 +17,8 @@ All notable software changes to AutoTao are recorded here. Mathematical work bel
 - Reset-aware usage runway: protect a simple percentage reserve and let AutoTao fill only
   the gap between normal usage and an even path to the finish line.
 - Plain-language TUI controls, in-product help, and a usage-first observatory visual system.
+- Current and historical session browser with readable agent/tool transcripts, keyboard
+  scrollback, and live-follow mode.
 - Standalone Bun build with configurable target, output path, and libc.
 - Parser, renderer, state-import, permissions, and atomic-write tests.
 

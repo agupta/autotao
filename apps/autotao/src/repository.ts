@@ -12,9 +12,12 @@ import {
   type GateState,
   type ProjectSnapshot,
   type RunState,
+  type SessionSummary,
+  type SessionTranscript,
   type UsageTank,
 } from "./protocol.ts"
 import { LocalStateStore, overlayLegacyConsoleSample, readLegacyConsoleSample } from "./state-store.ts"
+import { parseSessionLog } from "./session-log.ts"
 
 interface CommandResult {
   code: number
@@ -102,6 +105,52 @@ async function newestLog(root: string): Promise<{ path: string; mtimeMs: number;
     return candidates.sort((left, right) => right.mtimeMs - left.mtimeMs)[0] ?? null
   } catch {
     return null
+  }
+}
+
+function sessionEngine(name: string): string {
+  if (/(?:^|-)codex(?:-|\.)/.test(name)) return "codex"
+  if (/(?:^|-)claude(?:-|\.)/.test(name)) return "claude"
+  return "agent"
+}
+
+async function sessionSummaries(root: string): Promise<SessionSummary[]> {
+  const directory = join(root, "attempts/raw-logs")
+  try {
+    const names = (await readdir(directory)).filter((name) => name.endsWith(".log"))
+    const lock = await optionalRead(join(root, "attempts/.run.lock"))
+    const pid = /^\d+$/.test(lock.trim()) ? Number.parseInt(lock.trim(), 10) : null
+    const running = pid != null && processAlive(pid)
+    const sessions = await Promise.all(names.map(async (name) => {
+      const info = await stat(join(directory, name))
+      return {
+        id: name,
+        modifiedAt: info.mtime.toISOString(),
+        bytes: info.size,
+        engine: sessionEngine(name),
+        active: false,
+      } as SessionSummary
+    }))
+    sessions.sort((left, right) => right.modifiedAt.localeCompare(left.modifiedAt))
+    if (running && sessions[0]) sessions[0].active = true
+    return sessions
+  } catch {
+    return []
+  }
+}
+
+async function readBoundedLog(path: string, maxBytes = 16 * 1024 * 1024): Promise<{ text: string; truncated: boolean }> {
+  const info = await stat(path)
+  if (info.size <= maxBytes) return { text: await readFile(path, "utf8"), truncated: false }
+  const handle = await open(path, "r")
+  try {
+    const buffer = Buffer.alloc(maxBytes)
+    await handle.read(buffer, 0, maxBytes, info.size - maxBytes)
+    const text = buffer.toString("utf8")
+    const firstNewline = text.indexOf("\n")
+    return { text: firstNewline >= 0 ? text.slice(firstNewline + 1) : "", truncated: true }
+  } finally {
+    await handle.close()
   }
 }
 
@@ -287,6 +336,39 @@ export class RepositoryController implements AutoTaoController {
     // the old console has stopped. Normal live refreshes require a fresh cache.
     const merged = overlayLegacyConsoleSample(snapshot, { ...legacySample, fresh: true })
     return await this.stateStore.importLegacy(merged, legacySample.imported)
+  }
+
+  async listSessions(): Promise<SessionSummary[]> {
+    return await sessionSummaries(this.root)
+  }
+
+  async readSession(id: string): Promise<SessionTranscript> {
+    if (basename(id) !== id || !id.endsWith(".log")) throw new Error("Invalid session id")
+    const directory = join(this.root, "attempts/raw-logs")
+    const path = join(directory, id)
+    const [names, info, latest, lock] = await Promise.all([
+      readdir(directory),
+      stat(path),
+      newestLog(this.root),
+      optionalRead(join(this.root, "attempts/.run.lock")),
+    ])
+    if (!names.includes(id)) throw new Error(`Session not found: ${id}`)
+    const pid = /^\d+$/.test(lock.trim()) ? Number.parseInt(lock.trim(), 10) : null
+    const session: SessionSummary = {
+      id,
+      modifiedAt: info.mtime.toISOString(),
+      bytes: info.size,
+      engine: sessionEngine(id),
+      active: pid != null && processAlive(pid) && basename(latest?.path ?? "") === id,
+    }
+    const content = await readBoundedLog(path)
+    const parsed = parseSessionLog(content.text)
+    return {
+      session,
+      threadId: parsed.threadId,
+      truncated: content.truncated,
+      lines: parsed.lines,
+    }
   }
 
   async launch(): Promise<ActionResult> {

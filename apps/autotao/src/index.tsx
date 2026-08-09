@@ -17,7 +17,7 @@ Usage:
   autotao doctor          Validate configuration and adapter paths
   autotao --help          Show this help
 
-Dashboard keys: Space pause/resume autopilot · n run once · ? help · q quit`
+Dashboard keys: Enter live work · s session history · Space pause/resume · n run once · ? help · q quit`
 }
 
 async function doctor(root: string): Promise<number> {
