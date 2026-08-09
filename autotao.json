@@ -1,0 +1,23 @@
+{
+  "$schema": "./apps/autotao/autotao.schema.json",
+  "schemaVersion": 1,
+  "engine": "claude",
+  "project": {
+    "name": "autotao",
+    "adapter": "autotao"
+  },
+  "refreshMs": 5000,
+  "automation": {
+    "autoLaunch": true,
+    "launchIntervalMs": 600000,
+    "tickIntervalMs": 900000
+  },
+  "usage": {
+    "reservePercent": 5,
+    "pace": "even"
+  },
+  "commands": {
+    "launch": ["bash", "scripts/launch.sh"],
+    "tick": ["bash", "scripts/supervisor-tick.sh"]
+  }
+}

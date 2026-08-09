@@ -39,7 +39,7 @@ One iteration of the loop, unattended:
    `attempts/LOG.md`, commit.
 
 A supervision tier sits above this: a cheap triage pass after every run, budget and
-memory gates before every launch, an orphan reaper, and a console.
+memory gates before every launch, an orphan reaper, and a campaign-free OpenTUI console.
 
 ## The design decisions that matter
 
@@ -84,10 +84,11 @@ search than sixty-four agents for one afternoon. The ladder of lower bounds this
 produced was built one 90-minute run at a time, each starting from the last one's
 committed artifact.
 
-**The usage meters are a first-class input.** `scripts/budgets.conf` is the single place
-ceilings are defined, and `scripts/launch.sh` refuses to start a run that would breach
-them. A gate ceiling asks "may a new run start?" before spending anything; a derived kill
-ceiling asks "must the run in flight be terminated?" every 60 seconds. Measured on one
+**The usage meters are a first-class input.** `autotao.json` carries the operator's one
+plain-language choice—how much allowance to protect. `scripts/budgets.conf` carries the
+backend mechanics and direct-shell fallback: estimated run cost and overshoot margin.
+AutoTao derives launch/watchdog ceilings from those two inputs, and `scripts/launch.sh`
+refuses to start a run that would breach them. Measured on one
 plan: a ~90-minute iteration moves the 5-hour meter 25–30 points but the weekly meter only
 2–3. So the 5-hour window is the binding constraint, not the week — which means the right
 cadence is a few spaced runs a day, indefinitely, rather than a burst. Re-measure these on
@@ -135,7 +136,8 @@ LOOP_STATE.md        — iteration counter, priority queue, run model, push auth
 
 ## Quickstart
 
-Requires an agent CLI (Claude Code and/or Codex) already authenticated, plus a Python
+Requires an agent CLI (Claude Code and/or Codex) already authenticated, Bun 1.2 or newer
+for the source console (standalone release binaries do not require Bun), plus a Python
 environment for the verification scripts:
 
 ```bash
@@ -155,14 +157,43 @@ bash scripts/launch.sh
 #   0 launched · 1 usage ceiling · 2 memory floor · 3 meters unknown · 4 run in flight
 
 # 4. Continuous operation
-bash scripts/supervise-console.sh          # foreground supervision
+bash scripts/autotao.sh                    # recommended foreground supervision
 # or install the system-cron version:
 $EDITOR scripts/crontab.example
 ```
 
-Budget and memory ceilings live in **`scripts/budgets.conf` and nowhere else**. Do not
-add a second copy anywhere — two independent copies of a budget is the exact defect that
-killed three runs in one day.
+The checked-in `autotao.json` enables continuous supervision. By default AutoTao protects
+5% of each allowance and follows a steady path toward using the other 95% by reset. Your
+normal usage counts first; AutoTao fills only the gap with checked math runs. This avoids
+both leaving a large allowance unused and burning the whole week on day one.
+
+```json
+"usage": {
+  "reservePercent": 5,
+  "pace": "even"
+}
+```
+
+Set `pace` to `eager` to use available headroom immediately. Every run still passes the
+existing usage, memory, and one-run-at-a-time gates. Press `Space` to pause/resume
+autopilot, `n` to ask for one checked run now, `?` for an explanation, and `q` to quit.
+`bash scripts/supervise-console.sh` remains a compatibility entry point to the same app.
+
+Existing installations can perform a one-time import of durable legacy-console state:
+
+```bash
+bash scripts/autotao.sh import
+```
+
+Imported and last-known runtime state lives in ignored `.autotao/state.json`; it is never
+part of the mathematical ledger or a release artifact. See
+[`apps/autotao/README.md`](apps/autotao/README.md) for development, the versioned JSON
+protocol, and standalone builds.
+
+Set user intent only in **`autotao.json`** (`usage.reservePercent` and `usage.pace`). Keep
+run-cost estimates, the safety margin, and direct-shell fallback ceilings only in
+**`scripts/budgets.conf`**. The runtime derives its internal ceilings; do not hardcode a
+third copy in a launcher or UI.
 
 ## Bringing your own problems
 

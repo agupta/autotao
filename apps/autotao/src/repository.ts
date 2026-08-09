@@ -1,0 +1,301 @@
+import { spawn } from "node:child_process"
+import { open, readFile, readdir, stat } from "node:fs/promises"
+import { basename, join } from "node:path"
+import { freemem, loadavg } from "node:os"
+import type { AutoTaoConfig } from "./config.ts"
+import { integer, parseKeyValues, parseLatestLedger, parsePapersWanted, parsePipelineEvents } from "./parsers.ts"
+import {
+  SNAPSHOT_SCHEMA_VERSION,
+  type ActionResult,
+  type AutoTaoState,
+  type AutoTaoController,
+  type GateState,
+  type ProjectSnapshot,
+  type RunState,
+  type UsageTank,
+} from "./protocol.ts"
+import { LocalStateStore, overlayLegacyConsoleSample, readLegacyConsoleSample } from "./state-store.ts"
+
+interface CommandResult {
+  code: number
+  stdout: string
+  stderr: string
+  timedOut: boolean
+}
+
+async function runCommand(argv: string[], cwd: string, timeoutMs = 15000, environment: Record<string, string> = {}): Promise<CommandResult> {
+  if (argv.length === 0) throw new Error("Cannot execute an empty command")
+  return await new Promise((resolve) => {
+    const child = spawn(argv[0]!, argv.slice(1), {
+      cwd,
+      env: { ...process.env, ...environment },
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    const stdout: Buffer[] = []
+    const stderr: Buffer[] = []
+    let timedOut = false
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk))
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk))
+    const timer = setTimeout(() => {
+      timedOut = true
+      child.kill("SIGTERM")
+    }, timeoutMs)
+    child.on("error", (error) => {
+      clearTimeout(timer)
+      resolve({ code: 127, stdout: "", stderr: error.message, timedOut })
+    })
+    child.on("close", (code) => {
+      clearTimeout(timer)
+      resolve({
+        code: code ?? 1,
+        stdout: Buffer.concat(stdout).toString("utf8"),
+        stderr: Buffer.concat(stderr).toString("utf8"),
+        timedOut,
+      })
+    })
+  })
+}
+
+async function optionalRead(path: string): Promise<string> {
+  try {
+    return await readFile(path, "utf8")
+  } catch {
+    return ""
+  }
+}
+
+async function readTail(path: string, maxBytes = 256 * 1024): Promise<string> {
+  try {
+    const info = await stat(path)
+    const length = Math.min(info.size, maxBytes)
+    const handle = await open(path, "r")
+    try {
+      const buffer = Buffer.alloc(length)
+      await handle.read(buffer, 0, length, info.size - length)
+      return buffer.toString("utf8")
+    } finally {
+      await handle.close()
+    }
+  } catch {
+    return ""
+  }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function newestLog(root: string): Promise<{ path: string; mtimeMs: number; size: number } | null> {
+  const directory = join(root, "attempts/raw-logs")
+  try {
+    const names = (await readdir(directory)).filter((name) => name.endsWith(".log"))
+    const candidates = await Promise.all(names.map(async (name) => {
+      const path = join(directory, name)
+      const info = await stat(path)
+      return { path, mtimeMs: info.mtimeMs, size: info.size }
+    }))
+    return candidates.sort((left, right) => right.mtimeMs - left.mtimeMs)[0] ?? null
+  } catch {
+    return null
+  }
+}
+
+function tank(
+  id: string,
+  label: string,
+  used: number,
+  burn: number,
+  ceiling: number,
+  hardCap: number,
+  configuredFinishAt: number,
+  resetAt: number,
+  windowMinutes: number,
+  governed = true,
+): UsageTank {
+  const known = used >= 0
+  const backendFinishAt = hardCap >= 0 ? Math.min(100, hardCap) : configuredFinishAt
+  return {
+    id,
+    label,
+    used: known ? used : null,
+    burn,
+    ceiling: ceiling >= 0 ? ceiling : null,
+    hardCap: hardCap >= 0 ? hardCap : null,
+    projected: known ? used + burn : null,
+    governed,
+    finishAt: Math.min(configuredFinishAt, backendFinishAt),
+    resetAt: resetAt > 0 ? resetAt : null,
+    windowMinutes: windowMinutes > 0 ? windowMinutes : null,
+  }
+}
+
+function gateFrom(usage: CommandResult, capacity: CommandResult, config: AutoTaoConfig): GateState {
+  const values = parseKeyValues(usage.stdout)
+  const usageRc = integer(values.USAGE_RC, usage.code)
+  const engine = values.USAGE_ENGINE ?? "unknown"
+  const burnWeek = integer(values.USAGE_BURN_WEEK, 0)
+  const ceilingWeek = integer(values.USAGE_CEIL_WEEK)
+  const configuredFinishAt = 100 - config.usage.reservePercent
+  const tanks: UsageTank[] = []
+
+  if (engine === "codex") {
+    const uncapped = values.USAGE_UNCAPPED === "1"
+    tanks.push(tank(
+      "weekly",
+      "Weekly allowance",
+      integer(values.USAGE_WEEK),
+      burnWeek,
+      uncapped ? 100 : ceilingWeek,
+      integer(values.USAGE_HARD_CAP_WEEK, uncapped ? 100 : ceilingWeek),
+      configuredFinishAt,
+      integer(values.USAGE_RESET_AT),
+      integer(values.USAGE_WINDOW_MIN),
+    ))
+  } else {
+    tanks.push(tank("session", "Current 5-hour window", integer(values.USAGE_SESSION), integer(values.USAGE_BURN_SESSION, 0), integer(values.USAGE_CEIL_SESSION), integer(values.USAGE_HARD_CAP_SESSION), configuredFinishAt, integer(values.USAGE_SESSION_RESET_AT), 300))
+    tanks.push(tank("weekly", "Weekly allowance", integer(values.USAGE_WEEK), burnWeek, ceilingWeek, integer(values.USAGE_HARD_CAP_WEEK), configuredFinishAt, integer(values.USAGE_WEEK_RESET_AT), 10_080))
+    const modelWeek = values.USAGE_MODEL_WEEK
+    tanks.push(tank("model-week", `Weekly · ${values.USAGE_MODEL_KEY ?? "model"}`, modelWeek === "n/a" ? -1 : integer(modelWeek), burnWeek, ceilingWeek, integer(values.USAGE_HARD_CAP_WEEK), configuredFinishAt, integer(values.USAGE_WEEK_RESET_AT), 10_080, modelWeek !== "n/a"))
+  }
+
+  const phase = usageRc === 0 && capacity.code === 0 ? "open" : usageRc === 3 ? "unknown" : "closed"
+  const reason = values.USAGE_REASON || (capacity.code !== 0 ? capacity.stdout.trim() || capacity.stderr.trim() : "")
+  return {
+    phase,
+    health: phase === "open" ? "healthy" : phase === "unknown" ? "warning" : "critical",
+    usageRc,
+    capacityRc: capacity.code,
+    reason: reason || (phase === "open" ? "All launch checks pass" : `gate rc=${usageRc}, capacity rc=${capacity.code}`),
+    source: values.USAGE_SOURCE ?? null,
+    sampleAgeSeconds: integer(values.USAGE_AGE) >= 0 ? integer(values.USAGE_AGE) : null,
+    uncapped: values.USAGE_UNCAPPED === "1",
+    policy: config.usage,
+    tanks,
+  }
+}
+
+async function runState(root: string): Promise<RunState> {
+  const now = Date.now()
+  const [lock, log, launchText] = await Promise.all([
+    optionalRead(join(root, "attempts/.run.lock")),
+    newestLog(root),
+    optionalRead(join(root, "attempts/supervision/.last-launch")),
+  ])
+  const pid = /^\d+$/.test(lock.trim()) ? Number.parseInt(lock.trim(), 10) : null
+  const alive = pid != null && processAlive(pid)
+  const launchSeconds = /^\d+$/.test(launchText.trim()) ? Number.parseInt(launchText.trim(), 10) : null
+  return {
+    phase: alive ? "running" : pid == null ? "idle" : "stale-lock",
+    pid,
+    elapsedSeconds: alive && launchSeconds != null ? Math.max(0, Math.floor(now / 1000) - launchSeconds) : null,
+    lastWriteSeconds: log ? Math.max(0, Math.floor((now - log.mtimeMs) / 1000)) : null,
+    newestLog: log ? basename(log.path) : null,
+    newestLogBytes: log?.size ?? null,
+  }
+}
+
+function actionSummary(label: string, result: CommandResult): ActionResult {
+  const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n")
+  if (result.timedOut) return { ok: false, summary: `${label} timed out`, output }
+  return {
+    ok: result.code === 0,
+    summary: result.code === 0 ? `${label} completed` : `${label} refused (rc ${result.code})`,
+    output,
+  }
+}
+
+export class RepositoryController implements AutoTaoController {
+  private usageSample: { sampledAt: number; result: CommandResult } | null = null
+  private readonly stateStore: LocalStateStore
+
+  constructor(private readonly root: string, private readonly config: AutoTaoConfig) {
+    this.stateStore = new LocalStateStore(root)
+  }
+
+  private run(argv: string[], timeoutMs = 15000): Promise<CommandResult> {
+    const finishAt = String(100 - this.config.usage.reservePercent)
+    return runCommand(argv, this.root, timeoutMs, {
+      RUN_ENGINE: this.config.engine,
+      AUTOTAO_FINISH_AT: finishAt,
+    })
+  }
+
+  private async sampleUsage(): Promise<CommandResult> {
+    const now = Date.now()
+    if (this.usageSample && now - this.usageSample.sampledAt < 60_000) return this.usageSample.result
+    const result = await this.run(["bash", "scripts/usage.sh", "launch"], 20000)
+    this.usageSample = { sampledAt: now, result }
+    return result
+  }
+
+  async snapshot(): Promise<ProjectSnapshot> {
+    const [usage, capacity, engineResult, modelResult, run, tickText, ledgerText, wantedText, escalateText] = await Promise.all([
+      this.sampleUsage(),
+      this.run(["bash", "scripts/capacity.sh"], 5000),
+      this.run(["bash", "scripts/run-engine.sh"], 5000),
+      this.run(["bash", "scripts/run-model.sh"], 5000),
+      runState(this.root),
+      readTail(join(this.root, "attempts/supervision/tick.log"), 128 * 1024),
+      readTail(join(this.root, "attempts/LOG.md")),
+      optionalRead(join(this.root, "papers/WANTED.md")),
+      optionalRead(join(this.root, "attempts/supervision/ESCALATE")),
+    ])
+    const alerts: string[] = []
+    if (run.phase === "stale-lock") alerts.push(`Stale run lock for pid ${run.pid}`)
+    if (escalateText.trim()) alerts.push("Tier-2 escalation is pending")
+    const gate = gateFrom(usage, capacity, this.config)
+    if (gate.phase === "unknown") alerts.push(gate.reason)
+
+    const modelParts = modelResult.stdout.trim().split(/\s+/)
+    const snapshot: ProjectSnapshot = {
+      schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+      sampledAt: new Date().toISOString(),
+      project: {
+        name: this.config.project.name,
+        root: this.root,
+        adapter: this.config.project.adapter,
+      },
+      engine: engineResult.stdout.trim() || "unknown",
+      model: engineResult.stdout.trim() === "codex"
+        ? process.env.CODEX_MODEL || "configured default"
+        : modelParts[0] || "configured default",
+      run,
+      gate,
+      resources: {
+        availableMemoryMb: Math.round(freemem() / 1024 / 1024),
+        loadAverage: loadavg() as [number, number, number],
+        papersWanted: parsePapersWanted(wantedText),
+      },
+      ledger: parseLatestLedger(ledgerText),
+      pipeline: parsePipelineEvents(tickText),
+      alerts,
+    }
+    const legacySample = await readLegacyConsoleSample(this.root)
+    const merged = overlayLegacyConsoleSample(snapshot, legacySample)
+    await this.stateStore.updateSnapshot(merged).catch(() => undefined)
+    return merged
+  }
+
+  async importState(): Promise<AutoTaoState> {
+    const [snapshot, legacySample] = await Promise.all([this.snapshot(), readLegacyConsoleSample(this.root)])
+    // An explicit migration imports the last durable console sample even after
+    // the old console has stopped. Normal live refreshes require a fresh cache.
+    const merged = overlayLegacyConsoleSample(snapshot, { ...legacySample, fresh: true })
+    return await this.stateStore.importLegacy(merged, legacySample.imported)
+  }
+
+  async launch(): Promise<ActionResult> {
+    return actionSummary("Launch", await this.run(this.config.commands.launch, 30000))
+  }
+
+  async tick(): Promise<ActionResult> {
+    // Tier 1 may run for up to ten minutes. The client timeout must outlive the
+    // supervisor's own bound or it can orphan an otherwise healthy triage process.
+    return actionSummary("Supervisor tick", await this.run(this.config.commands.tick, 660_000))
+  }
+}

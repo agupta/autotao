@@ -8,7 +8,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-ENGINE="${1:-claude}"
+ENGINE="$(bash "$(dirname "$0")/run-engine.sh" "${1:-}")"
+export RUN_ENGINE="$ENGINE"
 BENCH="${2:-}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 mkdir -p attempts/raw-logs
@@ -57,7 +58,7 @@ read -r RESOLVED_MODEL _MODEL_KEY < <(bash "$(dirname "$0")/run-model.sh")
 # still carries it after the run itself is killed at RUN_TIMEOUT_MIN. That
 # makes pipeline-spawned compute precisely identifiable later — see
 # scripts/reap-orphans.sh. Work YOU start by hand never carries it, so a reaper
-# keyed on this can never touch your own babysitters or campaigns.
+# keyed on this can never touch your own long-lived operator processes.
 export AUTOTAO_RUN_ID="${AUTOTAO_RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
 
 export CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS="${CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS:-3}"
@@ -253,11 +254,30 @@ case "$ENGINE" in
     exit "$RC"
     ;;
   codex)
-    # Headless Codex. Sandboxed to this workspace; benchmark runs must not touch the
-    # network per harness/benchmark.md (audited from the raw log afterwards).
-    codex exec "$PROMPT" \
-      --full-auto \
-      > "attempts/raw-logs/${STAMP}-codex-${TAG}.log" 2>&1
+    # Headless Codex. JSONL supplies explicit terminal events for the engine-neutral
+    # supervisor. --full-auto retains workspace-write confinement and noninteractive
+    # approvals; benchmark network restrictions remain binding in the harness prompt.
+    LOGF="attempts/raw-logs/${STAMP}-codex-${TAG}.log"
+    CODEX_ARGS=(exec --json --full-auto)
+    [[ -n "${CODEX_MODEL:-}" ]] && CODEX_ARGS+=(--model "$CODEX_MODEL")
+    "${SETSID[@]}" "${TCMD[@]}" codex "${CODEX_ARGS[@]}" "$PROMPT" >> "$LOGF" 2>&1 &
+    CPID=$!
+    (
+      while sleep "${WATCHDOG_INTERVAL:-60}"; do
+        kill -0 "$CPID" 2>/dev/null || exit 0
+        rc=0
+        WOUT=$(bash "$(dirname "$0")/usage.sh" kill 2>&1 >/dev/null) || rc=$?
+        if [[ "$rc" -eq 1 ]]; then
+          echo "[watchdog $(date +%F-%H:%M)] hard ceiling breached — terminating run: ${WOUT##*$'\n'}" >> "$LOGF"
+          kill "$CPID" 2>/dev/null
+          exit 0
+        fi
+      done
+    ) &
+    WPID=$!
+    RC=0; wait "$CPID" || RC=$?
+    kill "$WPID" 2>/dev/null || true
+    exit "$RC"
     ;;
   *)
     echo "usage: $0 [claude|codex] [bench-<slug>]" >&2; exit 2 ;;

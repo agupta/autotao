@@ -29,15 +29,32 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$DIR/.." && pwd)"
 CACHE="$HOME/.claude/rate_limits_v2.json"
 
+ENGINE="$(bash "$DIR/run-engine.sh")"
+if [[ "$ENGINE" == codex ]]; then
+  exec bash "$DIR/codex-usage.sh" "$MODE"
+fi
+
 # BUDGETS_CONF overrides the path for tests only; production always uses the repo copy.
 # shellcheck source=budgets.conf
 source "${BUDGETS_CONF:-$DIR/budgets.conf}"
 
+if [[ "${AUTOTAO_FINISH_AT:-}" =~ ^[0-9]+$ ]]; then
+  ACTIVE_KILL_SESSION=$(( AUTOTAO_FINISH_AT + KILL_MARGIN ))
+  ACTIVE_KILL_WEEK=$(( AUTOTAO_FINISH_AT + KILL_MARGIN ))
+  (( ACTIVE_KILL_SESSION > 100 )) && ACTIVE_KILL_SESSION=100
+  (( ACTIVE_KILL_WEEK > 100 )) && ACTIVE_KILL_WEEK=100
+else
+  ACTIVE_KILL_SESSION="${RUN_SESSION_CAP:-$(( GATE_SESSION + KILL_MARGIN ))}"
+  ACTIVE_KILL_WEEK="${RUN_WEEKLY_CAP:-$(( GATE_WEEK + KILL_MARGIN ))}"
+fi
+ACTIVE_GATE_SESSION=$(( ACTIVE_KILL_SESSION - KILL_MARGIN ))
+ACTIVE_GATE_WEEK=$(( ACTIVE_KILL_WEEK - KILL_MARGIN ))
+
 case "$MODE" in
-  launch) CEIL_SESSION=$GATE_SESSION; CEIL_WEEK=$GATE_WEEK
+  launch) CEIL_SESSION=$ACTIVE_GATE_SESSION; CEIL_WEEK=$ACTIVE_GATE_WEEK
           BURN_S=$BURN_SESSION; BURN_W=$BURN_WEEK ;;
-  kill)   CEIL_SESSION=$(( GATE_SESSION + KILL_MARGIN ))
-          CEIL_WEEK=$((    GATE_WEEK    + KILL_MARGIN ))
+  kill)   CEIL_SESSION=$ACTIVE_KILL_SESSION
+          CEIL_WEEK=$ACTIVE_KILL_WEEK
           BURN_S=0; BURN_W=0 ;;
   *)      echo "usage.sh: unknown mode '$MODE' (want launch|kill)" >&2; exit 2 ;;
 esac
@@ -55,6 +72,7 @@ fi
 emit(){ # emit <rc> <reason>
   cat <<EOF
 USAGE_MODE=$MODE
+USAGE_ENGINE=claude
 USAGE_SESSION=${SESSION:--1}
 USAGE_WEEK=${WEEK:--1}
 USAGE_MODEL_KEY=$MODEL_KEY
@@ -63,6 +81,10 @@ USAGE_BURN_SESSION=$BURN_S
 USAGE_BURN_WEEK=$BURN_W
 USAGE_CEIL_SESSION=$CEIL_SESSION
 USAGE_CEIL_WEEK=$CEIL_WEEK
+USAGE_HARD_CAP_SESSION=$ACTIVE_KILL_SESSION
+USAGE_HARD_CAP_WEEK=$ACTIVE_KILL_WEEK
+USAGE_SESSION_RESET_AT=${SESSION_RESET:-0}
+USAGE_WEEK_RESET_AT=${WEEK_RESET:-0}
 USAGE_SEV=${SEV:-unknown}
 USAGE_AGE=${AGE:--1}
 USAGE_RC=$1
@@ -78,11 +100,12 @@ fail(){ # fail <rc> <reason>
 
 [[ -f "$CACHE" ]] || fail 3 "no usage cache and endpoint refresh failed"
 
-read -r SESSION WEEK MODELW SEV TS < <(
+read -r SESSION WEEK MODELW SEV TS SESSION_RESET WEEK_RESET < <(
   jq -r --arg m "$MODEL_KEY" \
     '[(.session // -1), (.weekly_all // -1),
       (if (.weekly_by_model // {} | has($m)) then (.weekly_by_model[$m] | tostring) else "n/a" end),
-      (.severity // "normal"), (.ts // 0)] | @tsv' "$CACHE"
+      (.severity // "normal"), (.ts // 0),
+      (.session_resets_at // 0), (.weekly_resets_at // 0)] | @tsv' "$CACHE"
 )
 AGE=$(( NOW - ${TS%.*} ))
 SESSION=${SESSION%.*}; WEEK=${WEEK%.*}

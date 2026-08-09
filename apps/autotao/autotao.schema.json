@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autotao.dev/schema/v1/autotao.json",
+  "title": "AutoTao project configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "project"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "engine": { "enum": ["claude", "codex"], "default": "claude" },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "adapter"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "adapter": { "enum": ["autotao", "legacy-new-math"] }
+      }
+    },
+    "refreshMs": { "type": "integer", "minimum": 1000, "maximum": 60000 },
+    "automation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "autoLaunch": { "type": "boolean", "default": false },
+        "launchIntervalMs": { "type": "integer", "minimum": 60000, "maximum": 86400000 },
+        "tickIntervalMs": {
+          "anyOf": [
+            { "const": 0 },
+            { "type": "integer", "minimum": 60000, "maximum": 86400000 }
+          ]
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reservePercent": { "type": "integer", "minimum": 0, "maximum": 90, "default": 5 },
+        "pace": { "enum": ["even", "eager"], "default": "even" }
+      }
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "launch": { "$ref": "#/$defs/command" },
+        "tick": { "$ref": "#/$defs/command" }
+      }
+    }
+  },
+  "$defs": {
+    "command": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1
+    }
+  }
+}

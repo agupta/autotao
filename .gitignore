@@ -5,6 +5,10 @@ nohup.out
 .claude/settings.local.json
 attempts/.run.lock
 
+# AutoTao's imported and last-known runtime state is machine-local. The portable
+# project contract is autotao.json; state snapshots must never enter git.
+.autotao/
+
 # Raw agent logs: large, and they contain whatever the run happened to print.
 # Keep them locally (the triage tier reads them); never publish them.
 attempts/raw-logs/*.log

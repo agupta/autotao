@@ -16,9 +16,11 @@
 # watchdog would kill it immediately · 4 a run is already in flight.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+ENGINE="$(bash scripts/run-engine.sh "${1:-}")"
+export RUN_ENGINE="$ENGINE"
 S=attempts/supervision; mkdir -p "$S"
 STAMP=$(date +%Y%m%d-%H%M%S)
-LOG="$S/launch-$STAMP.log"
+LOG="$S/launch-$STAMP-$ENGINE.log"
 
 # 1. Launch gate: usage ceilings + box capacity.
 bash scripts/should-run.sh >>"$LOG" 2>&1 || exit $?
@@ -36,6 +38,6 @@ if ! bash scripts/usage.sh kill >>"$LOG" 2>&1; then
 fi
 
 # 3. Committed. Detach the run itself.
-setsid bash scripts/run-once.sh claude >>"$LOG" 2>&1 </dev/null &
-echo "launched pid $! (log $LOG)" | tee -a "$LOG"
+setsid bash scripts/run-once.sh "$ENGINE" >>"$LOG" 2>&1 </dev/null &
+echo "launched $ENGINE pid $! (log $LOG)" | tee -a "$LOG"
 exit 0
