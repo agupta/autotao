@@ -13,7 +13,7 @@
     "tickIntervalMs": 900000
   },
   "usage": {
-    "reservePercent": 5,
+    "reservePercent": 10,
     "pace": "even"
   },
   "commands": {
