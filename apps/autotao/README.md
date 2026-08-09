@@ -56,6 +56,11 @@ bash scripts/autotao.sh snapshot --json
 bash scripts/autotao.sh doctor
 ```
 
+The workspace initializer and CLI installer register their checkout as the global profile;
+`bash scripts/install-cli.sh` also puts `autotao` on PATH. When launched interactively from
+a distinct local AutoTao project, startup offers global versus local state. `--global`, `--local`, and
+`AUTOTAO_SCOPE=global|local` bypass the chooser; noninteractive commands prefer global.
+
 ## State migration
 
 Existing installations may import the last durable state written by the retired Bash

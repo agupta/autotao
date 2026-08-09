@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
 import { access } from "node:fs/promises"
 import { join } from "node:path"
+import { createInterface } from "node:readline/promises"
 import { render } from "@opentui/solid"
 import { App } from "./app.tsx"
-import { loadConfig } from "./config.ts"
+import { discoverConfigChoices, isInside, loadConfig, type ConfigScope } from "./config.ts"
 import { RepositoryController } from "./repository.ts"
 
 function help(): string {
@@ -15,9 +16,67 @@ Usage:
   autotao state --json    Print AutoTao's persisted last-known state
   autotao snapshot --json Print one versioned state snapshot
   autotao doctor          Validate configuration and adapter paths
+  autotao --global        Use the shared AutoTao workspace
+  autotao --local         Use state from the current project
   autotao --help          Show this help
 
 Dashboard keys: Enter live work · s session history · Space pause/resume · n run once · ? help · q quit`
+}
+
+function parseScope(rawArgs: string[]): { args: string[]; scope: ConfigScope | null } {
+  let scope: ConfigScope | null = null
+  const args: string[] = []
+  for (const arg of rawArgs) {
+    if (arg === "--global" || arg === "--local") {
+      const next = arg.slice(2) as ConfigScope
+      if (scope && scope !== next) throw new Error("Choose only one of --global or --local")
+      scope = next
+    } else {
+      args.push(arg)
+    }
+  }
+  const environmentScope = process.env.AUTOTAO_SCOPE
+  if (environmentScope && environmentScope !== "global" && environmentScope !== "local") {
+    throw new Error(`AUTOTAO_SCOPE must be global or local, got: ${environmentScope}`)
+  }
+  if (scope && environmentScope && scope !== environmentScope) {
+    throw new Error(`CLI scope --${scope} conflicts with AUTOTAO_SCOPE=${environmentScope}`)
+  }
+  const inheritedScope = environmentScope as ConfigScope | undefined
+  return { args, scope: scope ?? inheritedScope ?? null }
+}
+
+async function selectConfig(
+  startDirectory: string,
+  scope: ConfigScope | null,
+  interactiveDashboard: boolean,
+): Promise<string | undefined> {
+  if (process.env.AUTOTAO_CONFIG) return undefined
+  const choices = await discoverConfigChoices(startDirectory)
+  if (scope) {
+    const selected = choices[scope]
+    if (!selected) throw new Error(`No ${scope} AutoTao state is available from ${startDirectory}`)
+    return selected
+  }
+  if (choices.global && choices.local) {
+    const runningFromGlobalHome = choices.globalHome
+      ? isInside(startDirectory, choices.globalHome)
+      : false
+    if (interactiveDashboard && !runningFromGlobalHome) {
+      const input = createInterface({ input: process.stdin, output: process.stdout })
+      try {
+        console.log("AutoTao found two state profiles:\n")
+        console.log(`  [G] Global  ${choices.global}`)
+        console.log(`  [L] Local   ${choices.local}\n`)
+        const answer = (await input.question("Use which state? [G/l] ")).trim().toLowerCase()
+        return answer === "l" || answer === "local" ? choices.local : choices.global
+      } finally {
+        input.close()
+      }
+    }
+    return choices.global
+  }
+  return choices.global ?? choices.local ?? undefined
 }
 
 async function doctor(root: string): Promise<number> {
@@ -44,13 +103,20 @@ async function doctor(root: string): Promise<number> {
   return ok ? 0 : 1
 }
 
-const args = process.argv.slice(2)
+const parsed = parseScope(process.argv.slice(2))
+const args = parsed.args
 if (args.includes("--help") || args.includes("-h")) {
   console.log(help())
   process.exit(0)
 }
 
-const loaded = await loadConfig()
+const startDirectory = process.env.AUTOTAO_START_DIR ?? process.cwd()
+const selectedConfig = await selectConfig(
+  startDirectory,
+  parsed.scope,
+  args.length === 0 && process.stdin.isTTY && process.stdout.isTTY,
+)
+const loaded = await loadConfig(startDirectory, selectedConfig)
 const controller = new RepositoryController(loaded.root, loaded.config)
 
 if (args[0] === "snapshot") {

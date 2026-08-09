@@ -21,6 +21,8 @@ All notable software changes to AutoTao are recorded here. Mathematical work bel
   scrollback, and live-follow mode.
 - Ignored private workspace initialization and automatic discovery, separating distributable
   application/templates from operator-owned mathematical state and Git history.
+- Global/local state selection with an ambiguity-only startup chooser, CLI/environment
+  overrides, a machine-local global-profile pointer, and an optional PATH launcher.
 - Standalone Bun build with configurable target, output path, and libc.
 - Parser, renderer, state-import, permissions, and atomic-write tests.
 

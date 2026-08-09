@@ -147,6 +147,7 @@ python3 -m venv .venv && .venv/bin/pip install sympy networkx python-sat
 ```bash
 # 1. Create an ignored private workspace for actual research state.
 bash scripts/init-workspace.sh
+bash scripts/install-cli.sh
 
 # 2. Add at least one problem inside that workspace. Score it first.
 cd .autotao/workspace
@@ -170,7 +171,16 @@ The public checkout contains the distributable application and clean templates. 
 problem files, ledgers, attempt artifacts, raw sessions, papers, runtime state, quota policy,
 and the private workspace's own Git history live under ignored `.autotao/workspace/`.
 Running `bash scripts/autotao.sh` anywhere in the public checkout prefers that workspace
-automatically. Direct harness commands should be run from inside the workspace.
+automatically. The optional installer exposes the same launcher as `autotao` on your PATH,
+so it can be started from any directory. Direct harness commands should be run from inside
+the workspace.
+
+When the current directory also belongs to a local AutoTao project, an interactive startup
+asks whether to use the shared **global** workspace or that project's **local** state. From
+the global AutoTao checkout itself, global state is selected without a redundant prompt.
+Use `autotao --global` or `autotao --local` to choose explicitly;
+`AUTOTAO_SCOPE=global|local` provides the same control for scripts. Headless commands default
+to global state when both exist.
 
 The checked-in `autotao.json` enables continuous supervision. By default AutoTao protects
 5% of each allowance and follows a steady path toward using the other 95% by reset. Your

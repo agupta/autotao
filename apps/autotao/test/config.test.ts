@@ -2,11 +2,21 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { loadConfig } from "../src/config.ts"
+import { discoverConfigChoices, loadConfig } from "../src/config.ts"
 
 const roots: string[] = []
+const originalEnvironment = {
+  AUTOTAO_CONFIG: process.env.AUTOTAO_CONFIG,
+  AUTOTAO_HOME: process.env.AUTOTAO_HOME,
+  AUTOTAO_SCOPE: process.env.AUTOTAO_SCOPE,
+  XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+}
 
 afterEach(async () => {
+  for (const [key, value] of Object.entries(originalEnvironment)) {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
@@ -71,5 +81,67 @@ describe("project configuration", () => {
     expect(loaded.path).toBe(join(workspace, "autotao.json"))
     expect(loaded.config.project.name).toBe("private-project")
     expect(loaded.config.engine).toBe("codex")
+  })
+
+  test("discovers distinct global and local state profiles", async () => {
+    const globalHome = await mkdtemp(join(tmpdir(), "autotao-global-"))
+    const localHome = await mkdtemp(join(tmpdir(), "autotao-local-"))
+    roots.push(globalHome, localHome)
+    const globalWorkspace = join(globalHome, ".autotao", "workspace")
+    await mkdir(globalWorkspace, { recursive: true })
+    await writeFile(join(globalWorkspace, "autotao.json"), "{}\n")
+    await writeFile(join(localHome, "autotao.json"), "{}\n")
+    process.env.AUTOTAO_HOME = globalHome
+
+    const choices = await discoverConfigChoices(localHome)
+
+    expect(choices.global).toBe(join(globalWorkspace, "autotao.json"))
+    expect(choices.local).toBe(join(localHome, "autotao.json"))
+    expect(choices.globalHome).toBe(globalHome)
+  })
+
+  test("discovers the registered machine-global profile", async () => {
+    const root = await mkdtemp(join(tmpdir(), "autotao-registration-"))
+    roots.push(root)
+    const globalHome = join(root, "global")
+    const globalWorkspace = join(globalHome, ".autotao", "workspace")
+    const configHome = join(root, "config")
+    const localHome = join(root, "local")
+    await mkdir(globalWorkspace, { recursive: true })
+    await mkdir(join(configHome, "autotao"), { recursive: true })
+    await mkdir(localHome, { recursive: true })
+    await writeFile(join(globalWorkspace, "autotao.json"), "{}\n")
+    await writeFile(join(configHome, "autotao", "home"), `${globalHome}\n`)
+    await writeFile(join(localHome, "autotao.json"), "{}\n")
+    delete process.env.AUTOTAO_HOME
+    process.env.XDG_CONFIG_HOME = configHome
+
+    const choices = await discoverConfigChoices(localHome)
+
+    expect(choices.global).toBe(join(globalWorkspace, "autotao.json"))
+    expect(choices.local).toBe(join(localHome, "autotao.json"))
+    expect(choices.globalHome).toBe(globalHome)
+  })
+
+  test("honors explicit global and local scope", async () => {
+    const globalHome = await mkdtemp(join(tmpdir(), "autotao-global-"))
+    const localHome = await mkdtemp(join(tmpdir(), "autotao-local-"))
+    roots.push(globalHome, localHome)
+    const globalWorkspace = join(globalHome, ".autotao", "workspace")
+    await mkdir(globalWorkspace, { recursive: true })
+    await writeFile(join(globalWorkspace, "autotao.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      project: { name: "global", adapter: "autotao" },
+    })}\n`)
+    await writeFile(join(localHome, "autotao.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      project: { name: "local", adapter: "autotao" },
+    })}\n`)
+    process.env.AUTOTAO_HOME = globalHome
+
+    process.env.AUTOTAO_SCOPE = "global"
+    expect((await loadConfig(localHome)).config.project.name).toBe("global")
+    process.env.AUTOTAO_SCOPE = "local"
+    expect((await loadConfig(localHome)).config.project.name).toBe("local")
   })
 })

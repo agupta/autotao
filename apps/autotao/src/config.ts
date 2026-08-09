@@ -1,5 +1,6 @@
 import { access, readFile } from "node:fs/promises"
-import { dirname, join, parse, resolve } from "node:path"
+import { homedir } from "node:os"
+import { dirname, join, parse, resolve, sep } from "node:path"
 import type { ProjectAdapter } from "./protocol.ts"
 
 export interface AutoTaoConfig {
@@ -31,6 +32,14 @@ export interface LoadedConfig {
   root: string
 }
 
+export type ConfigScope = "global" | "local"
+
+export interface ConfigChoices {
+  global: string | null
+  local: string | null
+  globalHome: string | null
+}
+
 const defaults = {
   engine: "claude",
   refreshMs: 5000,
@@ -58,7 +67,73 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+async function findUpward(start: string, relative: string[]): Promise<string | null> {
+  let cursor = resolve(start)
+  const filesystemRoot = parse(cursor).root
+  while (true) {
+    const candidate = join(cursor, ...relative)
+    if (await exists(candidate)) return candidate
+    if (cursor === filesystemRoot) return null
+    cursor = dirname(cursor)
+  }
+}
+
+async function registeredHome(): Promise<string | null> {
+  const configRoot = process.env.XDG_CONFIG_HOME
+    ? resolve(process.env.XDG_CONFIG_HOME)
+    : join(homedir(), ".config")
+  try {
+    const value = (await readFile(join(configRoot, "autotao", "home"), "utf8")).trim()
+    return value ? resolve(value) : null
+  } catch {
+    return null
+  }
+}
+
+export async function discoverConfigChoices(start = process.cwd()): Promise<ConfigChoices> {
+  const local = await findUpward(start, ["autotao.json"])
+  const upwardWorkspace = await findUpward(start, [".autotao", "workspace", "autotao.json"])
+  const configuredHome = process.env.AUTOTAO_HOME
+    ? resolve(process.env.AUTOTAO_HOME)
+    : await registeredHome()
+  const configuredGlobal = configuredHome
+    ? join(configuredHome, ".autotao", "workspace", "autotao.json")
+    : null
+  const global = configuredGlobal && await exists(configuredGlobal)
+    ? configuredGlobal
+    : upwardWorkspace
+  const globalHome = global ? dirname(dirname(dirname(global))) : null
+  return {
+    global,
+    local: local && resolve(local) !== resolve(global ?? "") ? local : null,
+    globalHome,
+  }
+}
+
+export function isInside(path: string, parent: string): boolean {
+  const candidate = resolve(path)
+  const root = resolve(parent)
+  return candidate === root || candidate.startsWith(`${root}${sep}`)
+}
+
 export async function findConfig(start = process.cwd()): Promise<string> {
+  const explicit = process.env.AUTOTAO_CONFIG
+  if (explicit) {
+    const path = resolve(explicit)
+    if (!await exists(path)) throw new Error(`AUTOTAO_CONFIG does not exist: ${path}`)
+    return path
+  }
+  const requestedScope = process.env.AUTOTAO_SCOPE
+  if (requestedScope && requestedScope !== "global" && requestedScope !== "local") {
+    throw new Error(`AUTOTAO_SCOPE must be global or local, got: ${requestedScope}`)
+  }
+  if (requestedScope) {
+    const choices = await discoverConfigChoices(start)
+    const scope = requestedScope as ConfigScope
+    const selected = choices[scope]
+    if (!selected) throw new Error(`No ${requestedScope} AutoTao state is available from ${resolve(start)}`)
+    return selected
+  }
   let cursor = resolve(start)
   const filesystemRoot = parse(cursor).root
   while (true) {
@@ -93,8 +168,8 @@ function interval(value: unknown, fallback: number, key: string, allowDisabled =
   return Number(candidate)
 }
 
-export async function loadConfig(start = process.cwd()): Promise<LoadedConfig> {
-  const path = await findConfig(start)
+export async function loadConfig(start = process.cwd(), selectedPath?: string): Promise<LoadedConfig> {
+  const path = selectedPath ? resolve(selectedPath) : await findConfig(start)
   const raw = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>
   const project = raw.project as Record<string, unknown> | undefined
 
