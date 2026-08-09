@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadConfig } from "../src/config.ts"
@@ -48,5 +48,28 @@ describe("project configuration", () => {
     expect(loaded.config.automation.autoLaunch).toBe(true)
     expect(loaded.config.automation.tickIntervalMs).toBe(900_000)
     expect(loaded.config.usage.reservePercent).toBe(0)
+  })
+
+  test("prefers an ignored private workspace over the distributable template", async () => {
+    const root = await mkdtemp(join(tmpdir(), "autotao-config-"))
+    roots.push(root)
+    await writeFile(join(root, "autotao.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      project: { name: "public-template", adapter: "autotao" },
+    })}\n`)
+    const workspace = join(root, ".autotao", "workspace")
+    await mkdir(workspace, { recursive: true })
+    await writeFile(join(workspace, "autotao.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      engine: "codex",
+      project: { name: "private-project", adapter: "autotao" },
+    })}\n`)
+
+    const loaded = await loadConfig(join(root, "apps", "autotao"))
+
+    expect(loaded.root).toBe(workspace)
+    expect(loaded.path).toBe(join(workspace, "autotao.json"))
+    expect(loaded.config.project.name).toBe("private-project")
+    expect(loaded.config.engine).toBe("codex")
   })
 })

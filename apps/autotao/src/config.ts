@@ -62,6 +62,11 @@ export async function findConfig(start = process.cwd()): Promise<string> {
   let cursor = resolve(start)
   const filesystemRoot = parse(cursor).root
   while (true) {
+    // A checkout can remain a clean, publishable application repository while
+    // all operator-owned mathematics lives in its ignored private workspace.
+    // Prefer that workspace transparently when it has been initialized.
+    const workspaceCandidate = join(cursor, ".autotao", "workspace", "autotao.json")
+    if (await exists(workspaceCandidate)) return workspaceCandidate
     const candidate = join(cursor, "autotao.json")
     if (await exists(candidate)) return candidate
     if (cursor === filesystemRoot) break

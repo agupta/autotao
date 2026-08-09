@@ -145,22 +145,32 @@ python3 -m venv .venv && .venv/bin/pip install sympy networkx python-sat
 ```
 
 ```bash
-# 1. Add at least one problem. Score it first.
+# 1. Create an ignored private workspace for actual research state.
+bash scripts/init-workspace.sh
+
+# 2. Add at least one problem inside that workspace. Score it first.
+cd .autotao/workspace
 cp problems/TEMPLATE.md problems/my-problem.md   # then fill it in; see criteria.md
 $EDITOR problems/INDEX.md                        # add its row
 
-# 2. Single supervised run, watching it work
+# 3. Single supervised run, watching it work
 bash scripts/run-once.sh claude
 
-# 3. Gated launch (budget + memory preflight, detaches, returns a real exit code)
+# 4. Return to the public checkout and launch the console. It discovers the workspace.
+cd ../..
+bash scripts/autotao.sh
+
+# 5. Gated launch from inside the workspace (detaches, returns a real exit code)
+cd .autotao/workspace
 bash scripts/launch.sh
 #   0 launched · 1 usage ceiling · 2 memory floor · 3 meters unknown · 4 run in flight
-
-# 4. Continuous operation
-bash scripts/autotao.sh                    # recommended foreground supervision
-# or install the system-cron version:
-$EDITOR scripts/crontab.example
 ```
+
+The public checkout contains the distributable application and clean templates. Actual
+problem files, ledgers, attempt artifacts, raw sessions, papers, runtime state, quota policy,
+and the private workspace's own Git history live under ignored `.autotao/workspace/`.
+Running `bash scripts/autotao.sh` anywhere in the public checkout prefers that workspace
+automatically. Direct harness commands should be run from inside the workspace.
 
 The checked-in `autotao.json` enables continuous supervision. By default AutoTao protects
 5% of each allowance and follows a steady path toward using the other 95% by reset. Your
@@ -188,8 +198,8 @@ Existing installations can perform a one-time import of durable legacy-console s
 bash scripts/autotao.sh import
 ```
 
-Imported and last-known runtime state lives in ignored `.autotao/state.json`; it is never
-part of the mathematical ledger or a release artifact. See
+Imported and last-known runtime state lives in the private workspace's ignored
+`.autotao/state.json`; it is never part of the mathematical ledger or a release artifact. See
 [`apps/autotao/README.md`](apps/autotao/README.md) for development, the versioned JSON
 protocol, and standalone builds.
 

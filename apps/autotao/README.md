@@ -47,7 +47,9 @@ bun run dev
 ```
 
 From the repository root, `bash scripts/autotao.sh` runs a compiled local binary when one
-exists and otherwise uses Bun. Headless integrations can consume the same state model:
+exists and otherwise uses Bun. When `.autotao/workspace/autotao.json` exists, configuration
+discovery prefers that ignored private project over the public checkout's clean template.
+Headless integrations consume the same selected project state model:
 
 ```bash
 bash scripts/autotao.sh snapshot --json
