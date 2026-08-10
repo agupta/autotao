@@ -3,6 +3,7 @@ import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import type { ActionResult, AutoTaoController, ProjectSnapshot, SessionSummary, SessionTranscript, TranscriptLine, TranscriptLineKind } from "./protocol.ts"
 import { bytes, duration, truncate } from "./format.ts"
 import { resetLabel, usageRunway } from "./usage-plan.ts"
+import { checkForUpdate, updateNotice } from "./update.ts"
 import { theme } from "./theme.ts"
 
 interface AppProps {
@@ -184,6 +185,7 @@ export function Dashboard(props: {
   width: number
   autoLaunch?: boolean
   help?: boolean
+  updateNotice?: string | null
 }) {
   const wide = () => props.width >= 108
   const sideBySide = () => props.width >= 76
@@ -222,8 +224,16 @@ export function Dashboard(props: {
         </Show>
       </box>
 
+      {/* Action feedback owns this row. An available update is not news worth
+          displacing a live result, so it fills the row only while idle. */}
       <box height={1} flexShrink={0} paddingX={1}>
-        <Show when={props.message} fallback={<text> </text>}>
+        <Show when={props.message} fallback={
+          <Show when={props.updateNotice} fallback={<text> </text>}>
+            {(notice) => (
+              <text fg={theme.brass}>↑ {truncate(notice(), Math.max(20, props.width - 6))}</text>
+            )}
+          </Show>
+        }>
           {(message) => (
             <text fg={message().ok ? theme.sage : theme.coral}>
               <strong>{message().ok ? "✓" : "!"}</strong> {truncate(message().summary, Math.max(20, props.width - 6))}
@@ -379,6 +389,7 @@ export function App(props: AppProps) {
   const [transcriptOffset, setTranscriptOffset] = createSignal(0)
   const [follow, setFollow] = createSignal(true)
   const [sessionsLoading, setSessionsLoading] = createSignal(false)
+  const [update, setUpdate] = createSignal<string | null>(null)
   let refreshInFlight: Promise<void> | null = null
   let transcriptInFlight: Promise<void> | null = null
   let lastLaunchAttemptAt = 0
@@ -584,6 +595,13 @@ export function App(props: AppProps) {
       maybeLaunch()
     }
     void start()
+
+    // Deliberately not awaited: the dashboard's job is to show the usage
+    // meters, and it must paint immediately on a box with no network. The
+    // check is cached for a day and swallows its own failures, so the worst
+    // case is that this row stays empty.
+    void checkForUpdate().then((status) => setUpdate(updateNotice(status)))
+
     const refreshTimer = setInterval(() => void cycle(), props.refreshMs)
     const tickTimer = props.automation.tickIntervalMs > 0
       ? setInterval(() => void act("tick"), props.automation.tickIntervalMs)
@@ -613,6 +631,7 @@ export function App(props: AppProps) {
               width={dimensions().width}
               autoLaunch={autopilot()}
               help={help()}
+              updateNotice={update()}
             />
           )}
         </Show>

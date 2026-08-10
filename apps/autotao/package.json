@@ -14,7 +14,6 @@
     "src",
     "scripts",
     "autotao.schema.json",
-    "bunfig.toml",
     "README.md",
     "LICENSE"
   ],
@@ -22,7 +21,7 @@
     "autotao": "src/index.tsx"
   },
   "scripts": {
-    "dev": "bun src/index.tsx",
+    "dev": "bun --preload @opentui/solid/preload src/index.tsx",
     "snapshot": "bun src/index.tsx snapshot --json",
     "doctor": "bun src/index.tsx doctor",
     "typecheck": "tsc --noEmit",

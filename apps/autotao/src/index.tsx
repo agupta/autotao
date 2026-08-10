@@ -6,6 +6,7 @@ import { render } from "@opentui/solid"
 import { App } from "./app.tsx"
 import { discoverConfigChoices, isInside, loadConfig, type ConfigScope } from "./config.ts"
 import { RepositoryController } from "./repository.ts"
+import { VERSION, checkForUpdate, performUpdate } from "./update.ts"
 
 function help(): string {
   return `AutoTao — autonomous workload supervision
@@ -16,8 +17,11 @@ Usage:
   autotao state --json    Print AutoTao's persisted last-known state
   autotao snapshot --json Print one versioned state snapshot
   autotao doctor          Validate configuration and adapter paths
+  autotao update          Install the latest release
+  autotao update --check  Report whether a newer release exists
   autotao --global        Use the shared AutoTao workspace
   autotao --local         Use state from the current project
+  autotao --version       Print the version
   autotao --help          Show this help
 
 Dashboard keys: Enter live work · s session history · Space pause/resume · n run once · ? help · q quit`
@@ -108,6 +112,30 @@ const args = parsed.args
 if (args.includes("--help") || args.includes("-h")) {
   console.log(help())
   process.exit(0)
+}
+
+if (args.includes("--version") || args.includes("-v")) {
+  console.log(VERSION)
+  process.exit(0)
+}
+
+// Updating must not depend on a valid project: a botched autotao.json is
+// exactly when you most want to be able to move to a fixed release.
+if (args[0] === "update") {
+  if (args.includes("--check")) {
+    const status = await checkForUpdate({ force: true })
+    if (status.latest == null) {
+      console.log(`autotao ${status.current} — could not reach GitHub to check for updates`)
+      process.exit(1)
+    }
+    console.log(
+      status.available
+        ? `autotao ${status.current} — ${status.latest} is available. Run \`autotao update\`.`
+        : `autotao ${status.current} is the latest release.`,
+    )
+    process.exit(0)
+  }
+  process.exit(await performUpdate())
 }
 
 const startDirectory = process.env.AUTOTAO_START_DIR ?? process.cwd()
