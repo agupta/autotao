@@ -80,6 +80,12 @@ export interface ProjectSnapshot {
   gate: GateState
   resources: ResourceState
   ledger: LedgerState | null
+  /**
+   * What the problem file says about the problem, for readers who do not work
+   * in its subfield. Null when there is no attempt yet, or no problem file to
+   * read. Presentation only — nothing here reaches the loop.
+   */
+  problemBrief?: ProblemBrief | null
   pipeline: PipelineEvent[]
   alerts: string[]
 }
@@ -95,6 +101,13 @@ export interface LegacyConsoleImport {
   lastRefusalAt: number | null
   processedLog: string | null
   escalationPending: boolean
+}
+
+export interface ProblemBrief {
+  slug: string
+  title: string | null
+  plain: string | null
+  activeTarget: string | null
 }
 
 export interface AutoTaoState {

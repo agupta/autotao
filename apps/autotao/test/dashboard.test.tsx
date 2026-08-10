@@ -84,7 +84,7 @@ describe("dashboard layout", () => {
     expect(frame).toContain("AUTOTAO")
     expect(frame).toContain("YOUR USAGE PLAN")
     expect(frame).toContain("AUTOPILOT ON")
-    expect(frame).toContain("LAST MATH ATTEMPT")
+    expect(frame).toContain("THE PROBLEM BEING WORKED ON")
     expect(frame).toContain("sample-problem")
     expect(frame.toLowerCase()).toMatch(/run (one )?now/)
     expect(frame).toMatch(/live work/i)

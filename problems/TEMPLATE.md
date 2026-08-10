@@ -3,6 +3,19 @@
 status-checked <YYYY-MM-DD> (web) · verification load: `mechanical` | `elementary-readable` | `needs-expert`
 track: A (proof-shaped) | B (certificate-shaped) | A+B · rubric score: <n>/12
 
+## IN PLAIN TERMS
+
+*Optional, and read by the supervision console — it is the only thing on the dashboard
+that says what the problem actually is.*
+
+Two or three sentences, aimed at a mathematician who does not work in this subfield: an
+algebraic geometer should come away understanding a problem in probability. No notation
+that is not defined here, and no reliance on the formal statement below.
+
+This section is for a human reader. It is not part of the problem specification, and a
+run must work from the FORMAL STATEMENT — if the two ever disagree, the formal statement
+is the problem and this paragraph is a bug.
+
 ## FORMAL STATEMENT
 
 One paragraph. Every term defined, every edge case pinned down: empty and trivial

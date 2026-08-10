@@ -4,6 +4,7 @@ import type { ActionResult, AutoTaoController, ProjectSnapshot, SessionSummary, 
 import { bytes, duration, truncate } from "./format.ts"
 import { resetLabel, usageRunway } from "./usage-plan.ts"
 import { checkForUpdate, updateNotice } from "./update.ts"
+import { attemptSummary, parseAttemptTarget, tierDetail } from "./problem-brief.ts"
 import { theme } from "./theme.ts"
 
 interface AppProps {
@@ -34,6 +35,11 @@ function Panel(props: PanelProps) {
       titleColor={props.accent ?? theme.quiet}
       backgroundColor={theme.panel}
       paddingX={1}
+      // Content taller than its panel must be cut off, not spilled. Without
+      // this, an overflowing line is painted outside the border and lands on
+      // top of whatever else occupies that row — two strings interleaved in
+      // one line, which reads as corruption rather than as truncation.
+      overflow="hidden"
       {...props.style}
     >
       {props.children}
@@ -64,13 +70,16 @@ function usageSentence(snapshot: ProjectSnapshot, nextRunFits: boolean): { text:
   return { text: "On pace — waiting before the next run", color: theme.sage }
 }
 
-function UsagePlan(props: { snapshot: ProjectSnapshot; width: number }) {
+function UsagePlan(props: { snapshot: ProjectSnapshot; width: number; stacked?: boolean }) {
   const plan = createMemo(() => usageRunway(props.snapshot.gate, new Date(props.snapshot.sampledAt).getTime()))
   const primary = () => plan().primary
   const status = () => usageSentence(props.snapshot, plan().nextRunFits)
-  const barWidth = () => Math.max(24, Math.min(76, props.width - 10))
+  const barWidth = () => Math.max(16, Math.min(76, props.width - (props.stacked ? 6 : 10)))
+  // Stacked in a narrow column: the four figures read as a list rather than a
+  // row that would have to be squeezed or truncated.
+  const height = () => props.stacked ? 11 : props.width >= 108 ? 6 : 5
   return (
-    <Panel title="YOUR USAGE PLAN" accent={theme.sky} style={{ height: props.width >= 108 ? 6 : 5, flexShrink: 0 }}>
+    <Panel title="YOUR USAGE PLAN" accent={theme.sky} style={{ height: height(), flexShrink: 0 }}>
       <Show when={primary()} fallback={
         <box flexDirection="column">
           <text fg={theme.coral}><strong>Usage data is not ready</strong></text>
@@ -79,23 +88,38 @@ function UsagePlan(props: { snapshot: ProjectSnapshot; width: number }) {
       }>
         {(runway) => (
           <box flexDirection="column">
-            <box flexDirection="row" justifyContent="space-between">
-              <text fg={status().color}><strong>{status().text}</strong></text>
-              <text fg={theme.quiet}>{runway().tank.label}</text>
-            </box>
+            <Show when={props.stacked} fallback={
+              <box flexDirection="row" justifyContent="space-between">
+                <text fg={status().color}><strong>{status().text}</strong></text>
+                <text fg={theme.quiet}>{runway().tank.label}</text>
+              </box>
+            }>
+              <text height={wrapParagraph(status().text, barWidth()).length} flexShrink={0} fg={status().color}>
+                <strong>{wrapParagraph(status().text, barWidth()).join("\n")}</strong>
+              </text>
+              <text height={1} flexShrink={0} fg={theme.quiet}>{runway().tank.label}</text>
+            </Show>
             <RunwayBar
               used={runway().tank.used ?? 0}
               paceAt={runway().paceAt}
               finishAt={runway().tank.finishAt}
               width={barWidth()}
             />
-            <box flexDirection="row" justifyContent="space-between">
-              <text fg={theme.sage}>{Math.round(runway().tank.used ?? 0)}% used</text>
-              <text fg={theme.sky}>{runway().paced ? `${Math.round(runway().paceAt)}% pace now` : "use spare capacity now"}</text>
-              <text fg={theme.paper}>finish at {Math.round(runway().tank.finishAt)}%</text>
-              <text fg={theme.reserve}>{Math.max(0, 100 - Math.round(runway().tank.finishAt))}% protected</text>
-            </box>
-            <Show when={props.width >= 108}>
+            <Show when={props.stacked} fallback={
+              <box flexDirection="row" justifyContent="space-between">
+                <text fg={theme.sage}>{Math.round(runway().tank.used ?? 0)}% used</text>
+                <text fg={theme.sky}>{runway().paced ? `${Math.round(runway().paceAt)}% pace now` : "use spare capacity now"}</text>
+                <text fg={theme.paper}>finish at {Math.round(runway().tank.finishAt)}%</text>
+                <text fg={theme.reserve}>{Math.max(0, 100 - Math.round(runway().tank.finishAt))}% protected</text>
+              </box>
+            }>
+              <text height={1} flexShrink={0} fg={theme.sage}>{`${Math.round(runway().tank.used ?? 0)}% used`}</text>
+              <text height={1} flexShrink={0} fg={theme.sky}>{runway().paced ? `${Math.round(runway().paceAt)}% pace right now` : "use spare capacity now"}</text>
+              <text height={1} flexShrink={0} fg={theme.paper}>{`finish at ${Math.round(runway().tank.finishAt)}%`}</text>
+              <text height={1} flexShrink={0} fg={theme.reserve}>{`${Math.max(0, 100 - Math.round(runway().tank.finishAt))}% protected`}</text>
+              <text height={1} flexShrink={0} fg={theme.quiet}>{resetLabel(runway().tank, new Date(props.snapshot.sampledAt).getTime())}</text>
+            </Show>
+            <Show when={!props.stacked && props.width >= 108}>
               <box flexDirection="row" justifyContent="space-between">
                 <text fg={theme.quiet}>Your normal usage counts first; AutoTao fills only the gap.</text>
                 <text fg={theme.quiet}>{resetLabel(runway().tank, new Date(props.snapshot.sampledAt).getTime())}</text>
@@ -108,56 +132,131 @@ function UsagePlan(props: { snapshot: ProjectSnapshot; width: number }) {
   )
 }
 
-function NowPanel(props: { snapshot: ProjectSnapshot; wide: boolean; sideBySide: boolean }) {
+function NowPanel(props: { snapshot: ProjectSnapshot; textWidth: number; compact?: boolean; style?: Record<string, unknown> }) {
   const running = () => props.snapshot.run.phase === "running"
   const latestEvent = () => props.snapshot.pipeline.at(-1)?.message
   return (
-    <Panel title="NOW" accent={running() ? theme.sage : theme.border} style={props.sideBySide ? { width: "38%", flexGrow: 0 } : { width: "100%", height: 4, flexShrink: 0 }}>
-      <text fg={running() ? theme.sage : theme.paper}>
+    <Panel title="NOW" accent={running() ? theme.sage : theme.border} style={props.style ?? { width: "100%", flexShrink: 0 }}>
+      {/* Every line below is a single string child on purpose. Splitting one
+          line across several children makes it several spans, which the live
+          renderer has been observed to paint over each other in a narrow box —
+          a header and its detail line landing in the same row, interleaved. */}
+      <text height={1} flexShrink={0} fg={running() ? theme.sage : theme.paper}>
         <strong>{running() ? "Working on mathematics" : "Waiting for the runway"}</strong>
       </text>
-      <Show when={running()}>
-        <text fg={theme.quiet}>{duration(props.snapshot.run.elapsedSeconds)} elapsed · output {duration(props.snapshot.run.lastWriteSeconds)} ago</text>
+      <Show when={running()} fallback={
+        <text height={1} flexShrink={0} fg={theme.quiet}>AutoTao checks again automatically.</text>
+      }>
+        <text height={1} flexShrink={0} fg={theme.quiet}>{`${duration(props.snapshot.run.elapsedSeconds)} elapsed`}</text>
+        <text height={1} flexShrink={0} fg={theme.quiet}>{`last output ${duration(props.snapshot.run.lastWriteSeconds)} ago`}</text>
       </Show>
-      <Show when={!running()}>
-        <text fg={theme.quiet}>AutoTao checks again automatically.</text>
-      </Show>
-      <Show when={props.wide && latestEvent()}>
-        {(event) => <text fg={theme.quiet} wrapMode="word">{event()}</text>}
-      </Show>
-      <Show when={props.wide && props.snapshot.run.newestLog}>
-        <text fg={theme.reserve}>{truncate(props.snapshot.run.newestLog ?? "", props.wide ? 44 : 24)} · {bytes(props.snapshot.run.newestLogBytes)}</text>
+      {/* Stacked under the problem panel, this is a status strip and must not
+          take room the mathematics needs. */}
+      <Show when={!props.compact}>
+        <Show when={latestEvent()}>
+          {(event) => (
+            <text
+              height={wrapParagraph(event(), props.textWidth).length}
+              flexShrink={0}
+              fg={theme.quiet}
+            >{wrapParagraph(event(), props.textWidth).join("\n")}</text>
+          )}
+        </Show>
+        <Show when={props.snapshot.run.newestLog}>
+          <text height={1} flexShrink={0} fg={theme.reserve}>{truncate(props.snapshot.run.newestLog ?? "", props.textWidth)}</text>
+          <text height={1} flexShrink={0} fg={theme.reserve}>{bytes(props.snapshot.run.newestLogBytes)}</text>
+        </Show>
       </Show>
     </Panel>
   )
 }
 
-function LastAttemptPanel(props: { snapshot: ProjectSnapshot; wide: boolean; sideBySide: boolean; width: number }) {
+/** A labelled block of wrapped prose. Nothing is truncated; long text wraps. */
+function Section(props: { label: string; body: string; width: number; fg?: string }) {
+  const lines = createMemo(() => wrapParagraph(props.body, props.width))
+  return (
+    <box flexDirection="column" flexShrink={0}>
+      <text height={1} flexShrink={0} fg={theme.reserve}>{props.label}</text>
+      <text
+        height={lines().length}
+        flexShrink={0}
+        fg={props.fg ?? theme.paper}
+      >{lines().join("\n")}</text>
+      <text height={1} flexShrink={0}> </text>
+    </box>
+  )
+}
+
+function LastAttemptPanel(props: { snapshot: ProjectSnapshot; textWidth: number; style?: Record<string, unknown> }) {
   const verdict = () => props.snapshot.ledger?.verdict.toLowerCase() ?? ""
   const verdictColor = () => /resolved|pass|partial|closed/.test(verdict()) ? theme.sage : /fail|invalid/.test(verdict()) ? theme.coral : theme.brass
-  const textWidth = () => Math.max(20, props.sideBySide ? Math.floor(props.width * 0.62) - 7 : props.width - 6)
-  const outcomeHeadline = (value: string) => {
-    const bold = /\*\*([^*]+)\*\*/.exec(value)?.[1]
-    const sentence = bold ?? value.split(/(?<=[.!?])\s/, 1)[0] ?? value
-    return sentence.replace(/[`*_]/g, "").trim()
-  }
+  const brief = () => props.snapshot.problemBrief ?? null
+  const coordinates = createMemo(() => parseAttemptTarget(props.snapshot.ledger?.target ?? ""))
+
+  // The slug is an identifier, not a description. Prefer the problem file's
+  // own title, which is written for humans.
+  const heading = () => brief()?.title ?? props.snapshot.ledger?.problem ?? ""
+  const outcome = (value: string) => value.replace(/[`*_]/g, "").trim()
+
   return (
-    <Panel title="LAST MATH ATTEMPT" accent={verdictColor()} style={props.sideBySide ? { flexGrow: 1 } : { width: "100%", flexGrow: 1 }}>
+    <Panel title="THE PROBLEM BEING WORKED ON" accent={verdictColor()} style={props.style ?? { width: "100%", flexGrow: 1 }}>
       <Show when={props.snapshot.ledger} fallback={
         <text fg={theme.quiet}>No attempt yet. Add a problem, then AutoTao can begin.</text>
       }>
         {(ledger) => (
           <box flexDirection="column">
             <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
-              <text fg={theme.paper}><strong>{ledger().problem}</strong></text>
+              <text fg={theme.paper}><strong>{truncate(heading(), Math.max(10, props.textWidth - 10))}</strong></text>
               <text fg={verdictColor()}>{ledger().verdict.toUpperCase()}</text>
             </box>
-            <text
-              height={wrapParagraph(ledger().target, textWidth()).length}
-              flexShrink={0}
-              fg={theme.quiet}
-            >{wrapParagraph(ledger().target, textWidth()).join("\n")}</text>
-            <text height={1} flexShrink={0} fg={theme.reserve}>{outcomeHeadline(ledger().outcome)}</text>
+            {/* The slug is only worth a line when it is not already the
+                heading — otherwise it is the same string twice. */}
+            <Show when={heading() !== ledger().problem}>
+              <text height={1} flexShrink={0} fg={theme.reserve}>{ledger().problem}</text>
+            </Show>
+            <text height={1} flexShrink={0}> </text>
+
+            {/* Written for a mathematician outside the subfield, when the
+                problem file supplies one. */}
+            <Show when={brief()?.plain}>
+              {(plain) => <Section label="WHAT THE PROBLEM IS" body={plain()} width={props.textWidth} />}
+            </Show>
+
+            {/* What a result would have to establish, in the problem file's own
+                words — including the constraints a proof has to satisfy. */}
+            <Show when={brief()?.activeTarget} fallback={
+              <Show when={coordinates().statement}>
+                <Section label="WHAT THIS ATTEMPT WENT AFTER" body={coordinates().statement} width={props.textWidth} />
+              </Show>
+            }>
+              {(target) => <Section label="WHAT A RESULT WOULD HAVE TO SHOW" body={target()} width={props.textWidth} fg={theme.quiet} />}
+            </Show>
+
+            <Show when={attemptSummary(coordinates())}>
+              {(summary) => (
+                <box flexDirection="column" flexShrink={0}>
+                  <text height={1} flexShrink={0} fg={theme.reserve}>THIS ATTEMPT</text>
+                  <text height={1} flexShrink={0} fg={theme.sky}>{truncate(summary(), props.textWidth)}</text>
+                  <Show when={tierDetail(coordinates().tier)}>
+                    {(detail) => {
+                      const lines = wrapParagraph(detail(), props.textWidth)
+                      return <text height={lines.length} flexShrink={0} fg={theme.quiet}>{lines.join("\n")}</text>
+                    }}
+                  </Show>
+                  <text height={1} flexShrink={0}> </text>
+                </box>
+              )}
+            </Show>
+
+            <box flexDirection="column" flexShrink={0}>
+              <text height={1} flexShrink={0} fg={theme.reserve}>HOW IT WENT</text>
+              <text
+                height={wrapParagraph(outcome(ledger().outcome), props.textWidth).length}
+                flexShrink={0}
+                fg={theme.quiet}
+              >{wrapParagraph(outcome(ledger().outcome), props.textWidth).join("\n")}</text>
+            </box>
+
             <text height={1} flexShrink={0} fg={theme.sky}>Enter opens the complete work transcript</text>
           </box>
         )}
@@ -188,41 +287,78 @@ export function Dashboard(props: {
   updateNotice?: string | null
 }) {
   const wide = () => props.width >= 108
-  const sideBySide = () => props.width >= 76
+  // Two columns once the right-hand column can still hold readable prose. The
+  // problem text is the reason this screen exists, so it gets the wide side and
+  // the operational panels stack down the narrow one.
+  const twoColumn = () => props.width >= 100
   const active = () => props.autoLaunch ?? false
   const showProjectName = () => props.snapshot.project.name.trim().toLowerCase() !== "autotao"
+  const sideWidth = () => Math.max(30, Math.min(46, Math.floor(props.width * 0.34)))
+  const sideText = () => Math.max(16, sideWidth() - 4)
+  const sideBySide = () => props.width >= 76
+  const mainText = () =>
+    twoColumn() ? Math.max(24, props.width - sideWidth() - 11)
+    : sideBySide() ? Math.max(20, Math.floor(props.width * 0.62) - 7)
+    : Math.max(20, props.width - 6)
+
+  const header = (
+    <box
+      height={3}
+      flexShrink={0}
+      flexDirection="row"
+      alignItems="center"
+      justifyContent="space-between"
+      backgroundColor={theme.header}
+      border
+      borderStyle="rounded"
+      borderColor={theme.border}
+      paddingX={1}
+    >
+      <box flexDirection="row" gap={1}>
+        <text fg={theme.sky}><strong>◆ AUTOTAO</strong></text>
+        <Show when={showProjectName()}><text fg={theme.paper}>{props.snapshot.project.name}</text></Show>
+      </box>
+      <box flexDirection="row" gap={1}>
+        <text fg={active() ? theme.sage : theme.brass}>● {active() ? "AUTOPILOT ON" : "AUTOPILOT PAUSED"}</text>
+        <Show when={wide() && !twoColumn()}><text fg={theme.quiet}>· {props.snapshot.engine} · {props.snapshot.model}</text></Show>
+      </box>
+    </box>
+  )
+
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.canvas} padding={1} gap={1}>
-      <box
-        height={3}
-        flexShrink={0}
-        flexDirection="row"
-        alignItems="center"
-        justifyContent="space-between"
-        backgroundColor={theme.header}
-        border
-        borderStyle="rounded"
-        borderColor={theme.border}
-        paddingX={1}
-      >
-        <box flexDirection="row" gap={1}>
-          <text fg={theme.sky}><strong>◆ AUTOTAO</strong></text>
-          <Show when={showProjectName()}><text fg={theme.paper}>{props.snapshot.project.name}</text></Show>
+      <Show when={twoColumn()} fallback={
+        <>
+          {header}
+          <UsagePlan snapshot={props.snapshot} width={props.width} stacked={false} />
+          {/* Between 76 and 100 columns there is not enough height to stack
+              both panels, so they sit side by side as before. */}
+          <box minHeight={8} flexGrow={1} flexDirection={sideBySide() ? "row" : "column"} gap={1}>
+            <Show when={!props.help} fallback={<HelpPanel snapshot={props.snapshot} />}>
+              <NowPanel
+                snapshot={props.snapshot}
+                textWidth={sideBySide() ? Math.max(16, Math.floor(props.width * 0.38) - 4) : mainText()}
+                compact
+                style={sideBySide() ? { width: "38%", flexGrow: 0 } : { width: "100%", height: 5, flexShrink: 0 }}
+              />
+              <LastAttemptPanel snapshot={props.snapshot} textWidth={mainText()} style={{ flexGrow: 1 }} />
+            </Show>
+          </box>
+        </>
+      }>
+        <box flexGrow={1} flexDirection="row" gap={1}>
+          <box width={sideWidth()} flexShrink={0} flexDirection="column" gap={1}>
+            {header}
+            <UsagePlan snapshot={props.snapshot} width={sideWidth()} stacked />
+            <NowPanel snapshot={props.snapshot} textWidth={sideText()} style={{ width: "100%", flexGrow: 1 }} />
+          </box>
+          <box flexGrow={1} flexDirection="column">
+            <Show when={!props.help} fallback={<HelpPanel snapshot={props.snapshot} />}>
+              <LastAttemptPanel snapshot={props.snapshot} textWidth={mainText()} style={{ width: "100%", flexGrow: 1 }} />
+            </Show>
+          </box>
         </box>
-        <box flexDirection="row" gap={1}>
-          <text fg={active() ? theme.sage : theme.brass}>● {active() ? "AUTOPILOT ON" : "AUTOPILOT PAUSED"}</text>
-          <Show when={wide()}><text fg={theme.quiet}>· {props.snapshot.engine} · {props.snapshot.model}</text></Show>
-        </box>
-      </box>
-
-      <UsagePlan snapshot={props.snapshot} width={props.width} />
-
-      <box minHeight={8} flexGrow={1} flexDirection={sideBySide() ? "row" : "column"} gap={1}>
-        <Show when={!props.help} fallback={<HelpPanel snapshot={props.snapshot} />}>
-          <NowPanel snapshot={props.snapshot} wide={wide()} sideBySide={sideBySide()} />
-          <LastAttemptPanel snapshot={props.snapshot} wide={wide()} sideBySide={sideBySide()} width={props.width} />
-        </Show>
-      </box>
+      </Show>
 
       {/* Action feedback owns this row. An available update is not news worth
           displacing a live result, so it fills the row only while idle. */}

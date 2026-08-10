@@ -4,6 +4,7 @@ import { basename, join } from "node:path"
 import { freemem, loadavg } from "node:os"
 import type { AutoTaoConfig } from "./config.ts"
 import { integer, parseKeyValues, parseLatestLedger, parsePapersWanted, parsePipelineEvents } from "./parsers.ts"
+import { parseProblemFile } from "./problem-brief.ts"
 import {
   SNAPSHOT_SCHEMA_VERSION,
   type ActionResult,
@@ -323,6 +324,16 @@ export class RepositoryController implements AutoTaoController {
       ledger: parseLatestLedger(ledgerText),
       pipeline: parsePipelineEvents(tickText),
       alerts,
+    }
+    // The problem file is the only place that says, in words, what is being
+    // worked on. Reading it is display-only and must never be able to fail the
+    // snapshot: a missing or unreadable file simply means less to show.
+    if (snapshot.ledger?.problem) {
+      const slug = snapshot.ledger.problem.trim()
+      if (/^[A-Za-z0-9._-]+$/.test(slug)) {
+        const markdown = await optionalRead(join(this.root, "problems", `${slug}.md`))
+        if (markdown) snapshot.problemBrief = parseProblemFile(slug, markdown)
+      }
     }
     const legacySample = await readLegacyConsoleSample(this.root)
     const merged = overlayLegacyConsoleSample(snapshot, legacySample)

@@ -5,6 +5,29 @@ All notable software changes to AutoTao are recorded here. Mathematical work bel
 
 ## Unreleased
 
+### Added
+
+- The dashboard says what problem is being worked on, in words. It reads the problem
+  file's title, an optional `## IN PLAIN TERMS` section, and the ACTIVE named target,
+  and shows those instead of only a slug. `problems/TEMPLATE.md` documents the optional
+  section. Reading is display-only; nothing here reaches the loop.
+- Internal bookkeeping is translated rather than shown raw. `T1 ACTIVE (attempt A=102,
+  tier P)` now reads as the attempt number, the named target, and the ambition tier in
+  words — publishable rung, decisive bottleneck, or full conjecture, per the schedule in
+  `harness/loop.md`.
+
+### Changed
+
+- A two-column dashboard above 100 columns: the header, usage plan and run status stack
+  down a narrow left column, and the mathematics gets the whole right-hand side, where
+  its text wraps instead of being cut off. Narrower terminals keep the previous layouts.
+
+### Fixed
+
+- Panel content that was taller than its panel spilled outside the border and painted
+  over whatever occupied those rows, so two lines merged into one and read as corrupted
+  text — `20h 23m elapsed` arriving as `208hi23moelapsed`. Panels now clip their content.
+
 ## 0.1.0 — 2026-08-10
 
 First public release.
