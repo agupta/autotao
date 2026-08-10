@@ -1,0 +1,153 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (must already exist)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  # The tag and the declared version must agree before anything is built. The
+  # self-updater compares the running binary's version against the latest
+  # release tag, so a mismatch would make every installed client believe it is
+  # permanently out of date and re-download on every check.
+  check:
+    name: Version agrees with tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - id: version
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          version="${tag#v}"
+          declared=$(node -p "require('./apps/autotao/package.json').version")
+          if [[ "$version" != "$declared" ]]; then
+            echo "::error::tag $tag implies $version but package.json declares $declared"
+            exit 1
+          fi
+          echo "tag=$tag"         >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  # @opentui/core ships a native addon per platform as an optional dependency,
+  # so `bun build --compile` cannot cross-compile: the target's addon is simply
+  # not installed on the builder. Each binary is therefore built on its own
+  # native runner. The asset names are a contract with `autotao update`, which
+  # constructs the filename it downloads from ${os}-${arch}.
+  build:
+    name: ${{ matrix.asset }}
+    needs: check
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest,    asset: autotao-linux-x64,      target: bun-linux-x64,    libc: glibc }
+          - { runner: ubuntu-24.04-arm, asset: autotao-linux-arm64,    target: bun-linux-arm64,  libc: glibc }
+          - { runner: macos-13,         asset: autotao-darwin-x64,     target: bun-darwin-x64,   libc: glibc }
+          - { runner: macos-14,         asset: autotao-darwin-arm64,   target: bun-darwin-arm64, libc: glibc }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check.outputs.tag }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - run: bun install --frozen-lockfile
+        working-directory: apps/autotao
+
+      - name: Verify
+        working-directory: apps/autotao
+        run: |
+          bun run typecheck
+          bun --conditions=browser test
+
+      - name: Build
+        working-directory: apps/autotao
+        env:
+          AUTOTAO_BUILD_TARGET: ${{ matrix.target }}
+          AUTOTAO_LIBC: ${{ matrix.libc }}
+        run: |
+          AUTOTAO_BUILD_OUTPUT="$PWD/${{ matrix.asset }}" bun scripts/build.ts
+
+      # A binary that cannot start is worse than a missing one: the updater will
+      # happily install it over a working copy.
+      - name: Binary runs and reports the released version
+        working-directory: apps/autotao
+        run: |
+          set -euo pipefail
+          got=$(./${{ matrix.asset }} --version)
+          want="${{ needs.check.outputs.version }}"
+          [[ "$got" == "$want" ]] || { echo "binary reports '$got', expected '$want'"; exit 1; }
+          ./${{ matrix.asset }} --help > /dev/null
+          echo "ok: $got"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: apps/autotao/${{ matrix.asset }}
+          retention-days: 1
+
+  publish:
+    name: Publish release
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check.outputs.tag }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: staging
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd staging
+          chmod +x autotao-*
+          sha256sum autotao-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Release notes
+        run: |
+          version="${{ needs.check.outputs.version }}"
+          {
+            echo '## Install'
+            echo
+            echo '```sh'
+            echo "curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/install.sh | sh"
+            echo '```'
+            echo
+            echo 'Already installed? `autotao update`.'
+            echo
+            # This version's CHANGELOG section: everything between its heading
+            # and the next heading at the same level.
+            awk -v v="$version" '
+              $0 ~ "^## \\[?" v "\\]?" { inside = 1; next }
+              inside && /^## / { exit }
+              inside { print }
+            ' CHANGELOG.md
+          } > NOTES.md
+          cat NOTES.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.check.outputs.tag }}
+          name: autotao ${{ needs.check.outputs.tag }}
+          body_path: NOTES.md
+          files: |
+            staging/autotao-*
+            staging/SHA256SUMS

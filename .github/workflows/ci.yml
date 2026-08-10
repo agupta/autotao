@@ -1,0 +1,187 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  console:
+    name: console (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: apps/autotao
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun --conditions=browser test
+
+      - name: Build standalone binary
+        run: bun run build
+
+      - name: Binary starts and answers
+        run: ./dist/autotao --help
+
+      # A compiled binary extracts its embedded native library to $TMPDIR on
+      # every start and never removes it — ~19MB per invocation, on a
+      # filesystem that is usually RAM. Unbounded growth here is invisible on a
+      # throwaway runner and ruinous on a box that runs unattended for months,
+      # so assert the bound rather than trusting it.
+      - name: Extracted native libraries do not accumulate
+        shell: bash
+        run: |
+          set -euo pipefail
+          count() { ls -1 "${TMPDIR:-/tmp}"/.*-*.so "${TMPDIR:-/tmp}"/.*-*.dylib 2>/dev/null | wc -l | tr -d ' '; }
+          age_all() {
+            for f in "${TMPDIR:-/tmp}"/.*-*.so "${TMPDIR:-/tmp}"/.*-*.dylib; do
+              [ -f "$f" ] && touch -t 202001010000 "$f" || true
+            done
+          }
+          for cycle in 1 2 3 4 5 6 7 8; do
+            age_all
+            ./dist/autotao --version > /dev/null
+            ./dist/autotao --help    > /dev/null
+          done
+          n=$(count)
+          echo "steady-state extracted libraries: $n"
+          # Two invocations per cycle, both newer than the prune threshold, so
+          # anything above a small constant means the prune stopped working.
+          if [ "$n" -gt 4 ]; then
+            echo "::error::extracted libraries are accumulating ($n after 8 cycles) — see src/tmp-prune.ts"
+            exit 1
+          fi
+
+  harness:
+    name: harness (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # macOS ships bash 3.2; the harness needs 4+. Installing it here is also
+      # the assertion that the documented remedy actually works.
+      - name: Install a current bash (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install bash coreutils
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+
+      - name: Syntax check every script
+        run: |
+          fail=0
+          for f in scripts/*.sh; do bash -n "$f" || { echo "syntax: $f"; fail=1; }; done
+          exit $fail
+
+      - uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: ./scripts
+          severity: warning
+
+      # Preflight is allowed to report a missing engine CLI — no runner has one.
+      # What must hold is that it runs to completion and finds the userland
+      # tools, which is the part the macOS port is responsible for.
+      - name: Preflight runs and detects the platform
+        run: bash scripts/preflight.sh || true
+
+      - name: Portability shims return sane values
+        run: |
+          set -euo pipefail
+          source scripts/portable.sh
+          at_require_bash
+
+          mem=$(at_avail_mem_mb)
+          [[ "$mem" -gt 0 ]] || { echo "at_avail_mem_mb returned '$mem'"; exit 1; }
+          echo "memory: ${mem}MB"
+
+          [[ "$(at_file_size README.md)" -gt 0 ]]  || { echo "at_file_size broken"; exit 1; }
+          [[ "$(at_file_mtime README.md)" -gt 0 ]] || { echo "at_file_mtime broken"; exit 1; }
+          [[ "$(at_sha256 README.md | wc -c)" -eq 65 ]] || { echo "at_sha256 broken"; exit 1; }
+          echo "deadline: $(at_deadline_utc 90)"
+
+          # at_ps_all must yield integer elapsed-seconds on both userlands.
+          at_ps_all | awk '{ if ($3 !~ /^[0-9]+$/) { print "non-integer etime: " $0; exit 1 } }'
+          echo "ps snapshot: $(at_ps_all | wc -l) processes"
+
+          # This shell's own cwd, read back through the pid interface.
+          cwd=$(at_proc_cwd $$); echo "cwd of $$: ${cwd:-<unavailable>}"
+
+      - name: Environment scoping identifies pipeline-spawned processes
+        run: |
+          set -euo pipefail
+          source scripts/portable.sh
+          env AUTOTAO_RUN_ID=ci-probe sleep 30 &
+          probe=$!
+          sleep 1
+          got=$(at_proc_env "$probe" AUTOTAO_RUN_ID || true)
+          kill "$probe" 2>/dev/null || true
+          if [[ "$got" != "ci-probe" ]]; then
+            echo "at_proc_env returned '$got', expected 'ci-probe'"
+            echo "the reaper would not be able to scope orphans on this platform"
+            exit 1
+          fi
+          echo "at_proc_env ok"
+
+      - name: Lock is exclusive and reclaims stale holders
+        run: |
+          set -euo pipefail
+          source scripts/portable.sh
+          d=$(mktemp -d)/l
+          ( source scripts/portable.sh; at_lock "$d" ) && echo "acquired in subshell"
+          # Trap released it on subshell exit, so it must be free again.
+          ( source scripts/portable.sh; at_lock "$d" ) || { echo "lock not released on exit"; exit 1; }
+          # A lock owned by a dead pid must be reclaimable, never a deadlock.
+          mkdir -p "$d"; echo 999999 > "$d/pid"
+          ( source scripts/portable.sh; at_lock "$d" ) || { echo "stale lock not reclaimed"; exit 1; }
+          echo "lock ok"
+
+      - name: Reaper detects, scopes, and reaps a planted orphan
+        run: |
+          set -euo pipefail
+          setsid env AUTOTAO_RUN_ID=ci-orphan sleep 120 </dev/null >/dev/null 2>&1 &
+          sleep 2
+          n=$(bash scripts/reap-orphans.sh --quiet)
+          [[ "$n" -ge 1 ]] || { echo "reaper found no planted orphan"; exit 1; }
+          # Work not started by the pipeline must stay invisible to it.
+          old=$(bash scripts/reap-orphans.sh --quiet --older-than 3600)
+          [[ "$old" -eq 0 ]] || { echo "--older-than filter ignored"; exit 1; }
+          bash scripts/reap-orphans.sh --kill --grace 2
+          sleep 1
+          [[ "$(bash scripts/reap-orphans.sh --quiet)" -eq 0 ]] || { echo "orphan survived --kill"; exit 1; }
+          echo "reaper ok"
+
+      - name: Budget invariants hold
+        run: bash scripts/selftest-budgets.sh
+
+      - name: Capacity predicate answers with a documented exit code
+        run: |
+          bash scripts/capacity.sh; rc=$?
+          case $rc in
+            0|2|4) echo "capacity exited $rc (documented)" ;;
+            *) echo "capacity exited $rc — undocumented"; exit 1 ;;
+          esac
