@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process"
-import { open, readFile, readdir, stat } from "node:fs/promises"
+import { open, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { freemem, loadavg } from "node:os"
 import type { AutoTaoConfig } from "./config.ts"
@@ -16,6 +16,7 @@ import {
   type SessionSummary,
   type SessionTranscript,
   type UsageTank,
+  type UsagePolicy,
 } from "./protocol.ts"
 import { LocalStateStore, overlayLegacyConsoleSample, readLegacyConsoleSample } from "./state-store.ts"
 import { parseSessionLog } from "./session-log.ts"
@@ -231,18 +232,25 @@ function gateFrom(usage: CommandResult, capacity: CommandResult, config: AutoTao
 
 async function runState(root: string): Promise<RunState> {
   const now = Date.now()
-  const [lock, log, launchText] = await Promise.all([
-    optionalRead(join(root, "attempts/.run.lock")),
+  const lockPath = join(root, "attempts/.run.lock")
+  const [lock, log, lockStat] = await Promise.all([
+    optionalRead(lockPath),
     newestLog(root),
-    optionalRead(join(root, "attempts/supervision/.last-launch")),
+    stat(lockPath).catch(() => null),
   ])
   const pid = /^\d+$/.test(lock.trim()) ? Number.parseInt(lock.trim(), 10) : null
   const alive = pid != null && processAlive(pid)
-  const launchSeconds = /^\d+$/.test(launchText.trim()) ? Number.parseInt(launchText.trim(), 10) : null
+  // The lock is written by run-once.sh at the instant the run starts and is not
+  // touched again, so its mtime is when this run began.
+  //
+  // This used to read attempts/supervision/.last-launch, which nothing has
+  // written since the Bash console was retired — it held a timestamp from nine
+  // days earlier, and every run was reported as ~209 hours old.
+  const launchedMs = lockStat?.mtimeMs ?? null
   return {
     phase: alive ? "running" : pid == null ? "idle" : "stale-lock",
     pid,
-    elapsedSeconds: alive && launchSeconds != null ? Math.max(0, Math.floor(now / 1000) - launchSeconds) : null,
+    elapsedSeconds: alive && launchedMs != null ? Math.max(0, Math.floor((now - launchedMs) / 1000)) : null,
     lastWriteSeconds: log ? Math.max(0, Math.floor((now - log.mtimeMs) / 1000)) : null,
     newestLog: log ? basename(log.path) : null,
     newestLogBytes: log?.size ?? null,
@@ -300,6 +308,8 @@ export class RepositoryController implements AutoTaoController {
     if (escalateText.trim()) alerts.push("Tier-2 escalation is pending")
     const gate = gateFrom(usage, capacity, this.config)
     if (gate.phase === "unknown") alerts.push(gate.reason)
+    const papersWanted = parsePapersWanted(wantedText)
+    if (papersWanted.length > 0) alerts.push(`${papersWanted.length} paper request${papersWanted.length === 1 ? "" : "s"} need operator attention`)
 
     const modelParts = modelResult.stdout.trim().split(/\s+/)
     const snapshot: ProjectSnapshot = {
@@ -319,7 +329,7 @@ export class RepositoryController implements AutoTaoController {
       resources: {
         availableMemoryMb: Math.round(freemem() / 1024 / 1024),
         loadAverage: loadavg() as [number, number, number],
-        papersWanted: parsePapersWanted(wantedText),
+        papersWanted,
       },
       ledger: parseLatestLedger(ledgerText),
       pipeline: parsePipelineEvents(tickText),
@@ -379,6 +389,37 @@ export class RepositoryController implements AutoTaoController {
       threadId: parsed.threadId,
       truncated: content.truncated,
       lines: parsed.lines,
+    }
+  }
+
+  async updateUsagePolicy(policy: UsagePolicy): Promise<ActionResult> {
+    if (!Number.isInteger(policy.reservePercent) || policy.reservePercent < 5 || policy.reservePercent > 90) {
+      return { ok: false, summary: "Protected reserve must be an integer from 5% to 90%", output: "" }
+    }
+    if (policy.pace !== "even" && policy.pace !== "eager") {
+      return { ok: false, summary: "Pacing must be even or eager", output: "" }
+    }
+
+    const path = join(this.root, "autotao.json")
+    const temporary = `${path}.tmp-${process.pid}`
+    try {
+      const raw = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>
+      const usage = raw.usage && typeof raw.usage === "object" && !Array.isArray(raw.usage)
+        ? raw.usage as Record<string, unknown>
+        : {}
+      raw.usage = { ...usage, reservePercent: policy.reservePercent, pace: policy.pace }
+      await writeFile(temporary, `${JSON.stringify(raw, null, 2)}\n`, { encoding: "utf8", mode: 0o600 })
+      await rename(temporary, path)
+      this.config.usage = { ...policy }
+      this.usageSample = null
+      return {
+        ok: true,
+        summary: `Usage plan saved: protect ${policy.reservePercent}%, ${policy.pace} pacing`,
+        output: path,
+      }
+    } catch (error) {
+      await unlink(temporary).catch(() => undefined)
+      return { ok: false, summary: `Could not save usage plan: ${error instanceof Error ? error.message : String(error)}`, output: "" }
     }
   }
 

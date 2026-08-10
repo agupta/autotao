@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js"
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
-import type { ActionResult, AutoTaoController, ProjectSnapshot, SessionSummary, SessionTranscript, TranscriptLine, TranscriptLineKind } from "./protocol.ts"
+import type { ActionResult, AutoTaoController, ProjectSnapshot, SessionSummary, SessionTranscript, TranscriptLine, TranscriptLineKind, UsagePolicy } from "./protocol.ts"
 import { bytes, duration, truncate } from "./format.ts"
 import { resetLabel, usageRunway } from "./usage-plan.ts"
 import { checkForUpdate, updateNotice } from "./update.ts"
@@ -171,17 +171,30 @@ function NowPanel(props: { snapshot: ProjectSnapshot; textWidth: number; compact
   )
 }
 
+/**
+ * Wrapped prose occupying exactly as many rows as it wraps to.
+ *
+ * The line count has to come from a memo. Computing it eagerly at the call site
+ * reserved the right number of rows but left the last one unpainted, so the
+ * final line of a paragraph silently vanished.
+ */
+function WrappedText(props: { body: string; width: number; fg?: string }) {
+  const lines = createMemo(() => wrapParagraph(props.body, props.width))
+  return (
+    <text
+      height={lines().length}
+      flexShrink={0}
+      fg={props.fg ?? theme.paper}
+    >{lines().join("\n")}</text>
+  )
+}
+
 /** A labelled block of wrapped prose. Nothing is truncated; long text wraps. */
 function Section(props: { label: string; body: string; width: number; fg?: string }) {
-  const lines = createMemo(() => wrapParagraph(props.body, props.width))
   return (
     <box flexDirection="column" flexShrink={0}>
       <text height={1} flexShrink={0} fg={theme.reserve}>{props.label}</text>
-      <text
-        height={lines().length}
-        flexShrink={0}
-        fg={props.fg ?? theme.paper}
-      >{lines().join("\n")}</text>
+      <WrappedText body={props.body} width={props.width} fg={props.fg} />
       <text height={1} flexShrink={0}> </text>
     </box>
   )
@@ -196,6 +209,8 @@ function LastAttemptPanel(props: { snapshot: ProjectSnapshot; textWidth: number;
   // The slug is an identifier, not a description. Prefer the problem file's
   // own title, which is written for humans.
   const heading = () => brief()?.title ?? props.snapshot.ledger?.problem ?? ""
+  // The verdict shares the first line, so only that line is narrowed for it.
+  const headingLines = createMemo(() => wrapParagraph(heading(), Math.max(10, props.textWidth - 10)))
   const outcome = (value: string) => value.replace(/[`*_]/g, "").trim()
 
   return (
@@ -205,10 +220,18 @@ function LastAttemptPanel(props: { snapshot: ProjectSnapshot; textWidth: number;
       }>
         {(ledger) => (
           <box flexDirection="column">
+            {/* The verdict sits on the first line, so only that line has to
+                leave room for it; the title wraps into the full width below
+                rather than being cut off. */}
             <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
-              <text fg={theme.paper}><strong>{truncate(heading(), Math.max(10, props.textWidth - 10))}</strong></text>
+              <text fg={theme.paper}><strong>{headingLines()[0]}</strong></text>
               <text fg={verdictColor()}>{ledger().verdict.toUpperCase()}</text>
             </box>
+            <Show when={headingLines().length > 1}>
+              <text height={headingLines().length - 1} flexShrink={0} fg={theme.paper}>
+                <strong>{headingLines().slice(1).join("\n")}</strong>
+              </text>
+            </Show>
             {/* The slug is only worth a line when it is not already the
                 heading — otherwise it is the same string twice. */}
             <Show when={heading() !== ledger().problem}>
@@ -237,11 +260,11 @@ function LastAttemptPanel(props: { snapshot: ProjectSnapshot; textWidth: number;
                 <box flexDirection="column" flexShrink={0}>
                   <text height={1} flexShrink={0} fg={theme.reserve}>THIS ATTEMPT</text>
                   <text height={1} flexShrink={0} fg={theme.sky}>{truncate(summary(), props.textWidth)}</text>
+                  {/* Through WrappedText, whose line count is a memo. Computing
+                      the height eagerly here dropped the last wrapped line:
+                      the row was reserved but never painted. */}
                   <Show when={tierDetail(coordinates().tier)}>
-                    {(detail) => {
-                      const lines = wrapParagraph(detail(), props.textWidth)
-                      return <text height={lines.length} flexShrink={0} fg={theme.quiet}>{lines.join("\n")}</text>
-                    }}
+                    {(detail) => <WrappedText body={detail()} width={props.textWidth} fg={theme.quiet} />}
                   </Show>
                   <text height={1} flexShrink={0}> </text>
                 </box>
@@ -250,11 +273,7 @@ function LastAttemptPanel(props: { snapshot: ProjectSnapshot; textWidth: number;
 
             <box flexDirection="column" flexShrink={0}>
               <text height={1} flexShrink={0} fg={theme.reserve}>HOW IT WENT</text>
-              <text
-                height={wrapParagraph(outcome(ledger().outcome), props.textWidth).length}
-                flexShrink={0}
-                fg={theme.quiet}
-              >{wrapParagraph(outcome(ledger().outcome), props.textWidth).join("\n")}</text>
+              <WrappedText body={outcome(ledger().outcome)} width={props.textWidth} fg={theme.quiet} />
             </box>
 
             <text height={1} flexShrink={0} fg={theme.sky}>Enter opens the complete work transcript</text>
@@ -272,7 +291,8 @@ function HelpPanel(props: { snapshot: ProjectSnapshot }) {
       <text fg={theme.paper}>Autopilot follows a steady path to {Math.round(finishAt())}% by reset.</text>
       <text fg={theme.quiet}>Your normal usage counts; AutoTao fills only the gap.</text>
       <text fg={theme.quiet}>Each run rechecks usage, memory, and the active-run lock.</text>
-      <text fg={theme.brass}>Enter live work · s past sessions · Space pause/resume</text>
+      <text fg={theme.brass}>Enter live work · s past sessions · u change usage plan</text>
+      <text fg={theme.brass}>Space pause/resume</text>
       <text fg={theme.quiet}>n run now · r refresh · t maintenance · ? close help</text>
     </Panel>
   )
@@ -364,10 +384,14 @@ export function Dashboard(props: {
           displacing a live result, so it fills the row only while idle. */}
       <box height={1} flexShrink={0} paddingX={1}>
         <Show when={props.message} fallback={
-          <Show when={props.updateNotice} fallback={<text> </text>}>
-            {(notice) => (
-              <text fg={theme.brass}>↑ {truncate(notice(), Math.max(20, props.width - 6))}</text>
-            )}
+          <Show when={props.snapshot.alerts[0]} fallback={
+            <Show when={props.updateNotice} fallback={<text> </text>}>
+              {(notice) => (
+                <text fg={theme.brass}>↑ {truncate(notice(), Math.max(20, props.width - 6))}</text>
+              )}
+            </Show>
+          }>
+            {(alert) => <text fg={theme.coral}>! {truncate(alert(), Math.max(20, props.width - 6))}</text>}
           </Show>
         }>
           {(message) => (
@@ -379,7 +403,39 @@ export function Dashboard(props: {
       </box>
 
       <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between" paddingX={1}>
-        <text fg={theme.paper}>{wide() ? "Enter  Live work   s  Sessions   Space  Pause   n  Run now   ?  Help   q  Quit" : "Enter live work · s sessions · Space pause · n run now · ? help"}</text>
+        <text fg={theme.paper}>{wide() ? "Enter  Live work   s  Sessions   u  Usage plan   Space  Pause   n  Run now   ?  Help   q  Quit" : "Enter live work · s sessions · u usage · Space pause · n run now · ? help"}</text>
+      </box>
+    </box>
+  )
+}
+
+export function UsageSettings(props: { policy: UsagePolicy; width: number }) {
+  const finishAt = () => 100 - props.policy.reservePercent
+  const barWidth = () => Math.max(20, Math.min(60, props.width - 12))
+  return (
+    <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.canvas} padding={1} gap={1}>
+      <box height={3} flexShrink={0} flexDirection="row" alignItems="center" backgroundColor={theme.header} border borderStyle="rounded" borderColor={theme.sky} paddingX={1}>
+        <text fg={theme.sky}><strong>◆ AUTOTAO</strong>  USAGE PLAN</text>
+      </box>
+      <Panel title="HOW MUCH SHOULD AUTOTAO PROTECT?" accent={theme.sky} style={{ flexGrow: 1 }}>
+        <box flexDirection="column" gap={1}>
+          <text fg={theme.paper}><strong>{`${props.policy.reservePercent}% protected for you`}</strong></text>
+          <box flexDirection="row">
+            <text fg={theme.sky}>{"━".repeat(Math.round(finishAt() / 100 * barWidth()))}</text>
+            <text fg={theme.reserve}>{"·".repeat(barWidth() - Math.round(finishAt() / 100 * barWidth()))}</text>
+          </box>
+          <text fg={theme.quiet}>{`AutoTao may use up to ${finishAt()}% before each allowance resets.`}</text>
+          <text fg={theme.paper}>{`Pacing: ${props.policy.pace === "even" ? "evenly through the window" : "use available headroom now"}`}</text>
+          <Show when={props.policy.pace === "even"} fallback={
+            <text fg={theme.quiet}>Eager mode starts whenever a checked run fits below the final limit.</text>
+          }>
+            <text fg={theme.quiet}>Even mode follows a steady runway, so the week is not spent on day one.</text>
+          </Show>
+          <text fg={theme.brass}>Your ordinary interactive usage counts first; AutoTao only fills the gap.</text>
+        </box>
+      </Panel>
+      <box height={1} flexShrink={0} paddingX={1}>
+        <text fg={theme.paper}>←→ change protected % · p toggle pacing · Enter save · Esc cancel</text>
       </box>
     </box>
   )
@@ -517,7 +573,7 @@ export function App(props: AppProps) {
   const [busy, setBusy] = createSignal(false)
   const [autopilot, setAutopilot] = createSignal(props.automation.autoLaunch)
   const [help, setHelp] = createSignal(false)
-  const [screen, setScreen] = createSignal<"dashboard" | "sessions" | "transcript">("dashboard")
+  const [screen, setScreen] = createSignal<"dashboard" | "sessions" | "transcript" | "usage">("dashboard")
   const [returnScreen, setReturnScreen] = createSignal<"dashboard" | "sessions">("dashboard")
   const [sessions, setSessions] = createSignal<SessionSummary[]>([])
   const [selectedSession, setSelectedSession] = createSignal(0)
@@ -526,6 +582,7 @@ export function App(props: AppProps) {
   const [follow, setFollow] = createSignal(true)
   const [sessionsLoading, setSessionsLoading] = createSignal(false)
   const [update, setUpdate] = createSignal<string | null>(null)
+  const [draftUsage, setDraftUsage] = createSignal<UsagePolicy>({ reservePercent: 10, pace: "even" })
   let refreshInFlight: Promise<void> | null = null
   let transcriptInFlight: Promise<void> | null = null
   let lastLaunchAttemptAt = 0
@@ -648,6 +705,27 @@ export function App(props: AppProps) {
     await loadTranscript(current.session.id)
   }
 
+  const openUsageSettings = () => {
+    const policy = snapshot()?.gate.policy
+    if (policy) setDraftUsage({ ...policy })
+    setScreen("usage")
+  }
+
+  const saveUsageSettings = async () => {
+    if (busy()) return
+    setBusy(true)
+    try {
+      const result = await props.controller.updateUsagePolicy(draftUsage())
+      setMessage(result)
+      if (result.ok) {
+        setScreen("dashboard")
+        await refresh()
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const maybeLaunch = () => {
     const current = snapshot()
     const now = Date.now()
@@ -663,6 +741,21 @@ export function App(props: AppProps) {
     const name = key.name.toLowerCase()
     if (name === "q") {
       renderer.destroy()
+      return
+    }
+
+    if (screen() === "usage") {
+      if (name === "escape") setScreen("dashboard")
+      if (name === "left" || name === "down" || name === "h" || name === "j") {
+        setDraftUsage((value) => ({ ...value, reservePercent: Math.max(5, value.reservePercent - 5) }))
+      }
+      if (name === "right" || name === "up" || name === "l" || name === "k") {
+        setDraftUsage((value) => ({ ...value, reservePercent: Math.min(90, value.reservePercent + 5) }))
+      }
+      if (name === "p" || name === "space") {
+        setDraftUsage((value) => ({ ...value, pace: value.pace === "even" ? "eager" : "even" }))
+      }
+      if (name === "return" || name === "enter") void saveUsageSettings()
       return
     }
 
@@ -707,6 +800,7 @@ export function App(props: AppProps) {
     if (name === "escape") renderer.destroy()
     if (name === "return" || name === "enter") void openNewestSession()
     if (name === "s") void browseSessions()
+    if (name === "u") openUsageSettings()
     if (name === "space") {
       setAutopilot((value) => !value)
       setMessage({ ok: true, summary: autopilot() ? "Autopilot resumed" : "Autopilot paused", output: "" })
@@ -749,6 +843,9 @@ export function App(props: AppProps) {
   })
 
   return (
+    <Show when={screen() !== "usage"} fallback={
+      <UsageSettings policy={draftUsage()} width={dimensions().width} />
+    }>
     <Show when={screen() !== "sessions"} fallback={
       <SessionBrowser sessions={sessions()} selected={selectedSession()} width={dimensions().width} height={dimensions().height} loading={sessionsLoading()} />
     }>
@@ -772,6 +869,7 @@ export function App(props: AppProps) {
           )}
         </Show>
       </Show>
+    </Show>
     </Show>
   )
 }
