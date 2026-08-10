@@ -7,6 +7,7 @@ import { App } from "./app.tsx"
 import { discoverConfigChoices, isInside, loadConfig, type ConfigScope } from "./config.ts"
 import { RepositoryController } from "./repository.ts"
 import { VERSION, checkForUpdate, performUpdate } from "./update.ts"
+import { pruneExtractedLibraries } from "./tmp-prune.ts"
 
 function help(): string {
   return `AutoTao — autonomous workload supervision
@@ -106,6 +107,13 @@ async function doctor(root: string): Promise<number> {
   }
   return ok ? 0 : 1
 }
+
+// Before anything else, and for every subcommand: a compiled binary extracts
+// its embedded native library into $TMPDIR on startup and leaves it there, so
+// each invocation costs ~19MB of a filesystem that is usually RAM. Clearing
+// what previous runs left is the only place we can do it — the extraction has
+// already happened by the time this file executes. See tmp-prune.ts.
+pruneExtractedLibraries()
 
 const parsed = parseScope(process.argv.slice(2))
 const args = parsed.args
