@@ -178,16 +178,45 @@ jobs:
       - name: Reaper detects, scopes, and reaps a planted orphan
         run: |
           set -euo pipefail
-          setsid env AUTOTAO_RUN_ID=ci-orphan sleep 120 </dev/null >/dev/null 2>&1 &
+
+          # An orphan is defined by ppid == 1, so the test has to produce a real
+          # one. `setsid` alone is not enough: it only forks when the caller is
+          # not already a process group leader, so under a CI step shell it
+          # execs in place and the process keeps its parent. --fork is explicit.
+          # macOS ships no setsid, so there the intermediate shell exits and
+          # launchd adopts the sleep.
+          if command -v setsid >/dev/null 2>&1; then
+            setsid --fork env AUTOTAO_RUN_ID=ci-orphan sleep 137 </dev/null >/dev/null 2>&1
+          else
+            env AUTOTAO_RUN_ID=ci-orphan bash -c 'sleep 137 </dev/null >/dev/null 2>&1 &'
+          fi
           sleep 2
+
+          pid=$(ps -eo pid=,args= | grep '[s]leep 137' | awk '{print $1}' | head -1)
+          [ -n "$pid" ] || { echo "could not plant a probe process at all"; exit 1; }
+          ppid=$(ps -o ppid= -p "$pid" | tr -d ' ')
+          echo "planted pid=$pid ppid=$ppid"
+
+          # Some environments run a subreaper that adopts orphans instead of
+          # init — a developer box under a session manager, for instance. There
+          # the premise of the test is absent, and failing would report a
+          # regression that is not one.
+          if [ "$ppid" != "1" ]; then
+            echo "::notice::orphans reparent to $ppid, not init; reaper scoping not exercised here"
+            kill "$pid" 2>/dev/null || true
+            exit 0
+          fi
+
           n=$(bash scripts/reap-orphans.sh --quiet)
-          [[ "$n" -ge 1 ]] || { echo "reaper found no planted orphan"; exit 1; }
+          [ "$n" -ge 1 ] || { echo "reaper found no planted orphan"; exit 1; }
+
           # Work not started by the pipeline must stay invisible to it.
           old=$(bash scripts/reap-orphans.sh --quiet --older-than 3600)
-          [[ "$old" -eq 0 ]] || { echo "--older-than filter ignored"; exit 1; }
+          [ "$old" -eq 0 ] || { echo "--older-than filter ignored"; exit 1; }
+
           bash scripts/reap-orphans.sh --kill --grace 2
           sleep 1
-          [[ "$(bash scripts/reap-orphans.sh --quiet)" -eq 0 ]] || { echo "orphan survived --kill"; exit 1; }
+          [ "$(bash scripts/reap-orphans.sh --quiet)" -eq 0 ] || { echo "orphan survived --kill"; exit 1; }
           echo "reaper ok"
 
       - name: Budget invariants hold
