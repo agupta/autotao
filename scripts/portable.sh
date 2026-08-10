@@ -91,6 +91,7 @@ at_deadline_utc(){
 # timeouts cannot reach it. macOS has no setsid; the run still detaches via the
 # background `&` and nohup semantics at the call site, it just shares a session.
 AT_SETSID=()
+# shellcheck disable=SC2034  # consumed by sourcing scripts, not by this file
 command -v setsid >/dev/null 2>&1 && AT_SETSID=(setsid)
 
 # GNU coreutils `timeout`, or Homebrew's g-prefixed one. Empty array when

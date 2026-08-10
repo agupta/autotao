@@ -59,7 +59,10 @@ case "$MODE" in
   *)      echo "usage.sh: unknown mode '$MODE' (want launch|kill)" >&2; exit 2 ;;
 esac
 
-read -r RUN_MODEL_RESOLVED MODEL_KEY < <(bash "$DIR/run-model.sh")
+# run-model.sh prints "<model> <key>"; only the key is used here, but the gate
+# and the launcher must agree on the model, so it is resolved from the same
+# place rather than assumed.
+read -r _ MODEL_KEY < <(bash "$DIR/run-model.sh")
 
 # Self-refresh if the cache is missing or older than CACHE_MAX_AGE (default 10 min).
 # The watchdog passes CACHE_MAX_AGE=55 to force a fresh read every tick.

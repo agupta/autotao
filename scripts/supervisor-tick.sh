@@ -15,7 +15,7 @@
 # Every agent spawn here is sanitized (env-sanitize.sh) + setsid so it is a
 # first-class root session.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 source scripts/portable.sh
 at_require_bash || exit 1
 source scripts/env-sanitize.sh
@@ -143,7 +143,6 @@ else:
   echo "$NL" > "$MARK"
   case "$(cat "$S/decision" 2>/dev/null || echo IDLE)" in
     RELAUNCH)
-      N6=$(grep -c "^relaunch" "$S/.relaunches" 2>/dev/null || echo 0)
       # prune relaunch ledger to the last 6h
       awk -v cut="$(( $(date +%s) - 21600 ))" '$2 >= cut' "$S/.relaunches" 2>/dev/null > "$S/.relaunches.new" && mv "$S/.relaunches.new" "$S/.relaunches" || true
       if (( $(wc -l < "$S/.relaunches" 2>/dev/null || echo 0) >= 2 )); then

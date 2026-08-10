@@ -13,7 +13,7 @@
 # The supervision console shows every open row in papers/WANTED.md until an
 # operator clears it with scripts/fetch-paper.sh.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 P=papers; mkdir -p "$P"; WANTED="$P/WANTED.md"
 
 REF="${1:-}"; NOTE="${2:-}"

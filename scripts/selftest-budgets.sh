@@ -9,6 +9,7 @@
 # ceiling, not to police arithmetic that can currently go wrong.
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=scripts/budgets.conf
 source "${BUDGETS_CONF:-$DIR/budgets.conf}"
 
 KILL_SESSION=$(( GATE_SESSION + KILL_MARGIN ))

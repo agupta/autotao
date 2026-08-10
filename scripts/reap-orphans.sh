@@ -35,7 +35,7 @@
 #   scripts/reap-orphans.sh --kill --older-than 3600
 #   scripts/reap-orphans.sh --quiet                # count only (for the console)
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 REPO="$PWD"
 source scripts/portable.sh
 at_require_bash || exit 1
@@ -108,7 +108,7 @@ fi
 
 printf '%-8s %-8s %6s  %-20s %s\n' PID AGE CPU% RUN CMD
 for row in "${ORPHANS[@]}"; do
-  IFS=$'\t' read -r pid et cpu dir rid cmd <<< "$row"
+  IFS=$'\t' read -r pid et cpu _ rid cmd <<< "$row"
   printf '%-8s %-8s %6s  %-20s %s\n' "$pid" \
     "$(awk -v s="$et" 'BEGIN{h=int(s/3600);m=int((s%3600)/60);printf "%dh%02dm",h,m}')" \
     "$cpu" "${rid:0:20}" "${cmd:0:64}"

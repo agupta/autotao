@@ -54,23 +54,38 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          count() { ls -1 "${TMPDIR:-/tmp}"/.*-*.so "${TMPDIR:-/tmp}"/.*-*.dylib 2>/dev/null | wc -l | tr -d ' '; }
-          age_all() {
-            for f in "${TMPDIR:-/tmp}"/.*-*.so "${TMPDIR:-/tmp}"/.*-*.dylib; do
-              [ -f "$f" ] && touch -t 202001010000 "$f" || true
-            done
-          }
+          tmp="${TMPDIR:-/tmp}"
+          # find, not ls: `ls` on an unmatched glob exits 2, which under
+          # pipefail aborts the step before it can report anything.
+          # "$@" lets callers append actions such as -exec.
+          extracted() { find "$tmp" -maxdepth 1 -type f \( -name '.*-*.so' -o -name '.*-*.dylib' \) "$@"; }
+          count()     { extracted | wc -l | tr -d ' '; }
+          age_all()   { extracted -exec touch -t 202001010000 {} + 2>/dev/null || true; }
+
+          before=$(count)
+          echo "extracted libraries before: $before"
+
           for cycle in 1 2 3 4 5 6 7 8; do
             age_all
             ./dist/autotao --version > /dev/null
             ./dist/autotao --help    > /dev/null
           done
+
           n=$(count)
-          echo "steady-state extracted libraries: $n"
+          echo "steady-state extracted libraries after 8 cycles: $n"
+
+          # A run that never extracts anything would pass this trivially, so say
+          # so rather than reporting a bound nothing exercised.
+          if [ "$n" -eq 0 ] && [ "$before" -eq 0 ]; then
+            echo "::notice::this runtime extracted no native libraries; the prune bound was not exercised"
+            exit 0
+          fi
+
           # Two invocations per cycle, both newer than the prune threshold, so
           # anything above a small constant means the prune stopped working.
           if [ "$n" -gt 4 ]; then
             echo "::error::extracted libraries are accumulating ($n after 8 cycles) — see src/tmp-prune.ts"
+            extracted
             exit 1
           fi
 

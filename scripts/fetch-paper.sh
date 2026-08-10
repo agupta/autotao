@@ -30,7 +30,7 @@
 # Prefer this script over raw curl. On failure: flag WANTED and continue —
 # never diagnose the publisher/source in problem files.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 source scripts/portable.sh
 at_require_bash || exit 1
 P=papers; mkdir -p "$P"
