@@ -5,12 +5,14 @@ import { freemem, loadavg } from "node:os"
 import type { AutoTaoConfig } from "./config.ts"
 import { integer, parseKeyValues, parseLatestLedger, parsePapersWanted, parsePipelineEvents } from "./parsers.ts"
 import { parseProblemFile } from "./problem-brief.ts"
+import { latestAgentMessage, parseResultMarkdown, problemFromDirectory } from "./live-attempt.ts"
 import {
   SNAPSHOT_SCHEMA_VERSION,
   type ActionResult,
   type AutoTaoState,
   type AutoTaoController,
   type GateState,
+  type LiveAttempt,
   type ProjectSnapshot,
   type RunState,
   type SessionSummary,
@@ -69,6 +71,24 @@ async function optionalRead(path: string): Promise<string> {
   }
 }
 
+/** First `maxBytes` of a file, for documents whose useful part is at the top. */
+async function readHead(path: string, maxBytes: number): Promise<string> {
+  try {
+    const handle = await open(path, "r")
+    try {
+      const info = await handle.stat()
+      const length = Math.min(info.size, maxBytes)
+      const buffer = Buffer.alloc(length)
+      await handle.read(buffer, 0, length, 0)
+      return buffer.toString("utf8")
+    } finally {
+      await handle.close()
+    }
+  } catch {
+    return ""
+  }
+}
+
 async function readTail(path: string, maxBytes = 256 * 1024): Promise<string> {
   try {
     const info = await stat(path)
@@ -107,6 +127,58 @@ async function newestLog(root: string): Promise<{ path: string; mtimeMs: number;
     return candidates.sort((left, right) => right.mtimeMs - left.mtimeMs)[0] ?? null
   } catch {
     return null
+  }
+}
+
+/**
+ * The attempt directory the running run is writing into: the most recently
+ * touched one, excluding the bookkeeping directories that live alongside them.
+ */
+async function newestAttemptDirectory(root: string): Promise<string | null> {
+  const attempts = join(root, "attempts")
+  try {
+    const entries = await readdir(attempts, { withFileTypes: true })
+    const candidates = await Promise.all(
+      entries
+        .filter((entry) => entry.isDirectory() && entry.name !== "raw-logs" && entry.name !== "supervision")
+        .map(async (entry) => ({ name: entry.name, mtimeMs: (await stat(join(attempts, entry.name))).mtimeMs })),
+    )
+    return candidates.sort((left, right) => right.mtimeMs - left.mtimeMs)[0]?.name ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * What the running attempt is doing, from its own artifacts.
+ *
+ * RESULT.md is the better source and exists from the ship-by-halfway mark
+ * onwards; before that only the transcript has anything, so the newest agent
+ * message stands in. Both reads are bounded — this runs on every refresh.
+ */
+async function liveAttemptState(root: string): Promise<LiveAttempt | null> {
+  const directory = await newestAttemptDirectory(root)
+  if (!directory) return null
+
+  const resultText = await readHead(join(root, "attempts", directory, "RESULT.md"), 128 * 1024)
+  const summary = parseResultMarkdown(resultText)
+
+  let latestActivity: string | null = null
+  if (!summary.outcome) {
+    const log = await newestLog(root)
+    if (log) latestActivity = latestAgentMessage(await readTail(log.path, 256 * 1024))
+  }
+
+  return {
+    directory,
+    problem: problemFromDirectory(directory),
+    title: summary.title,
+    attempt: summary.attempt,
+    tier: summary.tier,
+    target: summary.target,
+    outcome: summary.outcome,
+    approaches: summary.approaches,
+    latestActivity,
   }
 }
 
@@ -335,15 +407,21 @@ export class RepositoryController implements AutoTaoController {
       pipeline: parsePipelineEvents(tickText),
       alerts,
     }
+    // Only while something is running: when idle the ledger is the truth, and
+    // this is two file reads per refresh.
+    if (run.phase === "running") {
+      snapshot.liveAttempt = await liveAttemptState(this.root)
+    }
+
     // The problem file is the only place that says, in words, what is being
-    // worked on. Reading it is display-only and must never be able to fail the
-    // snapshot: a missing or unreadable file simply means less to show.
-    if (snapshot.ledger?.problem) {
-      const slug = snapshot.ledger.problem.trim()
-      if (/^[A-Za-z0-9._-]+$/.test(slug)) {
-        const markdown = await optionalRead(join(this.root, "problems", `${slug}.md`))
-        if (markdown) snapshot.problemBrief = parseProblemFile(slug, markdown)
-      }
+    // worked on. Read it for whatever is actually being attempted — the running
+    // run's problem when there is one, since it can differ from the last
+    // ledger line's. Display-only, and never able to fail the snapshot: a
+    // missing or unreadable file simply means less to show.
+    const slug = (snapshot.liveAttempt?.problem ?? snapshot.ledger?.problem ?? "").trim()
+    if (slug && /^[A-Za-z0-9._-]+$/.test(slug)) {
+      const markdown = await optionalRead(join(this.root, "problems", `${slug}.md`))
+      if (markdown) snapshot.problemBrief = parseProblemFile(slug, markdown)
     }
     const legacySample = await readLegacyConsoleSample(this.root)
     const merged = overlayLegacyConsoleSample(snapshot, legacySample)

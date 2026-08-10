@@ -6,6 +6,11 @@ export type Health = "healthy" | "warning" | "critical" | "unknown"
 export type RunPhase = "running" | "idle" | "stale-lock"
 export type GatePhase = "open" | "closed" | "unknown"
 
+export interface UsagePolicy {
+  reservePercent: number
+  pace: "even" | "eager"
+}
+
 export interface UsageTank {
   id: string
   label: string
@@ -38,10 +43,7 @@ export interface GateState {
   source: string | null
   sampleAgeSeconds: number | null
   uncapped: boolean
-  policy: {
-    reservePercent: number
-    pace: "even" | "eager"
-  }
+  policy: UsagePolicy
   tanks: UsageTank[]
 }
 
@@ -86,6 +88,12 @@ export interface ProjectSnapshot {
    * read. Presentation only — nothing here reaches the loop.
    */
   problemBrief?: ProblemBrief | null
+  /**
+   * The attempt happening right now, which is not the same thing as the last
+   * line in the ledger — that is only written when a run closes, and can be a
+   * different target at a different ambition tier.
+   */
+  liveAttempt?: LiveAttempt | null
   pipeline: PipelineEvent[]
   alerts: string[]
 }
@@ -101,6 +109,18 @@ export interface LegacyConsoleImport {
   lastRefusalAt: number | null
   processedLog: string | null
   escalationPending: boolean
+}
+
+export interface LiveAttempt {
+  directory: string
+  problem: string | null
+  title: string | null
+  attempt: number | null
+  tier: "P" | "B" | "F" | null
+  target: string | null
+  outcome: string | null
+  approaches: string[]
+  latestActivity: string | null
 }
 
 export interface ProblemBrief {
@@ -150,6 +170,7 @@ export interface AutoTaoController {
   importState(): Promise<AutoTaoState>
   listSessions(): Promise<SessionSummary[]>
   readSession(id: string): Promise<SessionTranscript>
+  updateUsagePolicy(policy: UsagePolicy): Promise<ActionResult>
   launch(): Promise<ActionResult>
   tick(): Promise<ActionResult>
 }

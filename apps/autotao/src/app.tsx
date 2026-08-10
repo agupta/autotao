@@ -4,7 +4,7 @@ import type { ActionResult, AutoTaoController, ProjectSnapshot, SessionSummary, 
 import { bytes, duration, truncate } from "./format.ts"
 import { resetLabel, usageRunway } from "./usage-plan.ts"
 import { checkForUpdate, updateNotice } from "./update.ts"
-import { attemptSummary, parseAttemptTarget, tierDetail } from "./problem-brief.ts"
+import { attemptSummary, parseAttemptTarget, tierDetail, tierLabel } from "./problem-brief.ts"
 import { theme } from "./theme.ts"
 
 interface AppProps {
@@ -119,12 +119,12 @@ function UsagePlan(props: { snapshot: ProjectSnapshot; width: number; stacked?: 
               <text height={1} flexShrink={0} fg={theme.reserve}>{`${Math.max(0, 100 - Math.round(runway().tank.finishAt))}% protected`}</text>
               <text height={1} flexShrink={0} fg={theme.quiet}>{resetLabel(runway().tank, new Date(props.snapshot.sampledAt).getTime())}</text>
             </Show>
-            <Show when={!props.stacked && props.width >= 108}>
+            {!props.stacked && props.width >= 108 ? (
               <box flexDirection="row" justifyContent="space-between">
                 <text fg={theme.quiet}>Your normal usage counts first; AutoTao fills only the gap.</text>
                 <text fg={theme.quiet}>{resetLabel(runway().tank, new Date(props.snapshot.sampledAt).getTime())}</text>
               </box>
-            </Show>
+            ) : null}
           </box>
         )}
       </Show>
@@ -152,21 +152,23 @@ function NowPanel(props: { snapshot: ProjectSnapshot; textWidth: number; compact
       </Show>
       {/* Stacked under the problem panel, this is a status strip and must not
           take room the mathematics needs. */}
-      <Show when={!props.compact}>
-        <Show when={latestEvent()}>
-          {(event) => (
+      {!props.compact ? (
+        <box flexDirection="column">
+          {latestEvent() ? (
             <text
-              height={wrapParagraph(event(), props.textWidth).length}
+              height={wrapParagraph(latestEvent() ?? "", props.textWidth).length}
               flexShrink={0}
               fg={theme.quiet}
-            >{wrapParagraph(event(), props.textWidth).join("\n")}</text>
-          )}
-        </Show>
-        <Show when={props.snapshot.run.newestLog}>
-          <text height={1} flexShrink={0} fg={theme.reserve}>{truncate(props.snapshot.run.newestLog ?? "", props.textWidth)}</text>
-          <text height={1} flexShrink={0} fg={theme.reserve}>{bytes(props.snapshot.run.newestLogBytes)}</text>
-        </Show>
-      </Show>
+            >{wrapParagraph(latestEvent() ?? "", props.textWidth).join("\n")}</text>
+          ) : null}
+          {props.snapshot.run.newestLog ? (
+            <box flexDirection="column">
+              <text height={1} flexShrink={0} fg={theme.reserve}>{truncate(props.snapshot.run.newestLog, props.textWidth)}</text>
+              <text height={1} flexShrink={0} fg={theme.reserve}>{bytes(props.snapshot.run.newestLogBytes)}</text>
+            </box>
+          ) : null}
+        </box>
+      ) : null}
     </Panel>
   )
 }
@@ -204,11 +206,29 @@ function LastAttemptPanel(props: { snapshot: ProjectSnapshot; textWidth: number;
   const verdict = () => props.snapshot.ledger?.verdict.toLowerCase() ?? ""
   const verdictColor = () => /resolved|pass|partial|closed/.test(verdict()) ? theme.sage : /fail|invalid/.test(verdict()) ? theme.coral : theme.brass
   const brief = () => props.snapshot.problemBrief ?? null
+  const live = () => props.snapshot.liveAttempt ?? null
   const coordinates = createMemo(() => parseAttemptTarget(props.snapshot.ledger?.target ?? ""))
+
+  // While a run is in flight it is what the operator cares about. The ledger's
+  // newest line is the *previous* attempt — often a different target at a
+  // different ambition tier — so it is demoted rather than shown as current.
+  const liveSummary = createMemo(() => {
+    const attempt = live()
+    if (!attempt) return null
+    const parts: string[] = []
+    if (attempt.attempt != null) parts.push(`Attempt ${attempt.attempt}`)
+    if (attempt.target) parts.push(`target ${attempt.target}`)
+    const tier = tierLabel(attempt.tier)
+    if (tier) parts.push(`going for ${tier}`)
+    return parts.length ? parts.join(" · ") : null
+  })
 
   // The slug is an identifier, not a description. Prefer the problem file's
   // own title, which is written for humans.
-  const heading = () => brief()?.title ?? props.snapshot.ledger?.problem ?? ""
+  // The running run's problem, not the ledger's — they differ whenever the
+  // rotation has moved on, which is most of the time.
+  const currentProblem = () => live()?.problem ?? props.snapshot.ledger?.problem ?? ""
+  const heading = () => brief()?.title ?? currentProblem()
   // The verdict shares the first line, so only that line is narrowed for it.
   const headingLines = createMemo(() => wrapParagraph(heading(), Math.max(10, props.textWidth - 10)))
   const outcome = (value: string) => value.replace(/[`*_]/g, "").trim()
@@ -225,56 +245,100 @@ function LastAttemptPanel(props: { snapshot: ProjectSnapshot; textWidth: number;
                 rather than being cut off. */}
             <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
               <text fg={theme.paper}><strong>{headingLines()[0]}</strong></text>
-              <text fg={verdictColor()}>{ledger().verdict.toUpperCase()}</text>
+              <text fg={live() ? theme.sage : verdictColor()}>{live() ? "RUNNING" : ledger().verdict.toUpperCase()}</text>
             </box>
-            <Show when={headingLines().length > 1}>
+            {headingLines().length > 1 ? (
               <text height={headingLines().length - 1} flexShrink={0} fg={theme.paper}>
                 <strong>{headingLines().slice(1).join("\n")}</strong>
               </text>
-            </Show>
+            ) : null}
             {/* The slug is only worth a line when it is not already the
                 heading — otherwise it is the same string twice. */}
-            <Show when={heading() !== ledger().problem}>
-              <text height={1} flexShrink={0} fg={theme.reserve}>{ledger().problem}</text>
-            </Show>
+            {heading() !== currentProblem() ? (
+              <text height={1} flexShrink={0} fg={theme.reserve}>{currentProblem()}</text>
+            ) : null}
             <text height={1} flexShrink={0}> </text>
 
             {/* Written for a mathematician outside the subfield, when the
                 problem file supplies one. */}
-            <Show when={brief()?.plain}>
-              {(plain) => <Section label="WHAT THE PROBLEM IS" body={plain()} width={props.textWidth} />}
-            </Show>
+            {brief()?.plain
+              ? <Section label="WHAT THE PROBLEM IS" body={brief()?.plain ?? ""} width={props.textWidth} />
+              : null}
 
             {/* What a result would have to establish, in the problem file's own
-                words — including the constraints a proof has to satisfy. */}
-            <Show when={brief()?.activeTarget} fallback={
-              <Show when={coordinates().statement}>
-                <Section label="WHAT THIS ATTEMPT WENT AFTER" body={coordinates().statement} width={props.textWidth} />
-              </Show>
+                words — including the constraints a proof has to satisfy.
+                Suppressed while a run is live until that run has said which
+                target it picked: the problem file's ACTIVE target need not be
+                the one this run chose, and the ledger's is a different attempt
+                on possibly a different problem. Showing either would be a
+                confident statement about the wrong thing. */}
+            <Show when={!live() || live()?.target ? brief()?.activeTarget : null} fallback={
+              !live() && coordinates().statement
+                ? <Section label="WHAT THIS ATTEMPT WENT AFTER" body={coordinates().statement} width={props.textWidth} />
+                : null
             }>
               {(target) => <Section label="WHAT A RESULT WOULD HAVE TO SHOW" body={target()} width={props.textWidth} fg={theme.quiet} />}
             </Show>
 
-            <Show when={attemptSummary(coordinates())}>
-              {(summary) => (
+            {(live() ? liveSummary() : attemptSummary(coordinates())) ? (
                 <box flexDirection="column" flexShrink={0}>
-                  <text height={1} flexShrink={0} fg={theme.reserve}>THIS ATTEMPT</text>
-                  <text height={1} flexShrink={0} fg={theme.sky}>{truncate(summary(), props.textWidth)}</text>
+                  <text height={1} flexShrink={0} fg={theme.reserve}>{live() ? "THIS RUN" : "THIS ATTEMPT"}</text>
+                  <text height={1} flexShrink={0} fg={theme.sky}>
+                    {truncate((live() ? liveSummary() : attemptSummary(coordinates())) ?? "", props.textWidth)}
+                  </text>
                   {/* Through WrappedText, whose line count is a memo. Computing
                       the height eagerly here dropped the last wrapped line:
                       the row was reserved but never painted. */}
-                  <Show when={tierDetail(coordinates().tier)}>
-                    {(detail) => <WrappedText body={detail()} width={props.textWidth} fg={theme.quiet} />}
-                  </Show>
+                  {tierDetail(live()?.tier ?? coordinates().tier)
+                    ? <WrappedText body={tierDetail(live()?.tier ?? coordinates().tier) ?? ""} width={props.textWidth} fg={theme.quiet} />
+                    : null}
                   <text height={1} flexShrink={0}> </text>
                 </box>
-              )}
-            </Show>
+            ) : null}
 
-            <box flexDirection="column" flexShrink={0}>
-              <text height={1} flexShrink={0} fg={theme.reserve}>HOW IT WENT</text>
-              <WrappedText body={outcome(ledger().outcome)} width={props.textWidth} fg={theme.quiet} />
-            </box>
+            {/* The running run's own section headings: the lines of attack it
+                is pursuing, in the words it gave them. */}
+            {(live()?.approaches.length ?? 0) > 0 ? (
+              <box flexDirection="column" flexShrink={0}>
+                <text height={1} flexShrink={0} fg={theme.reserve}>WHAT IT IS TRYING</text>
+                <For each={live()?.approaches ?? []}>
+                  {(approach) => (
+                    <text height={1} flexShrink={0} fg={theme.paper}>{truncate(`• ${approach}`, props.textWidth)}</text>
+                  )}
+                </For>
+                <text height={1} flexShrink={0}> </text>
+              </box>
+            ) : null}
+
+            {/* While a run is live, where it has got to comes from the artifact
+                harness/loop.md requires it to ship by the halfway mark; before
+                that exists, the newest thing it said. The ledger's newest line
+                is the *previous* attempt and is demoted to one line. */}
+            {live() ? (
+              <box flexDirection="column" flexShrink={0}>
+                {(live()?.outcome ?? live()?.latestActivity) ? (
+                  <box flexDirection="column" flexShrink={0}>
+                    <text height={1} flexShrink={0} fg={theme.reserve}>
+                      {live()?.outcome ? "WHERE IT HAS GOT TO" : "MOST RECENT ACTIVITY"}
+                    </text>
+                    <WrappedText
+                      body={outcome(live()?.outcome ?? live()?.latestActivity ?? "")}
+                      width={props.textWidth}
+                      fg={theme.quiet}
+                    />
+                    <text height={1} flexShrink={0}> </text>
+                  </box>
+                ) : null}
+                <text height={1} flexShrink={0} fg={theme.reserve}>
+                  {truncate(`Previously: ${ledger().problem} — ${ledger().verdict}`, props.textWidth)}
+                </text>
+              </box>
+            ) : (
+              <box flexDirection="column" flexShrink={0}>
+                <text height={1} flexShrink={0} fg={theme.reserve}>HOW IT WENT</text>
+                <WrappedText body={outcome(ledger().outcome)} width={props.textWidth} fg={theme.quiet} />
+              </box>
+            )}
 
             <text height={1} flexShrink={0} fg={theme.sky}>Enter opens the complete work transcript</text>
           </box>
@@ -336,11 +400,11 @@ export function Dashboard(props: {
     >
       <box flexDirection="row" gap={1}>
         <text fg={theme.sky}><strong>◆ AUTOTAO</strong></text>
-        <Show when={showProjectName()}><text fg={theme.paper}>{props.snapshot.project.name}</text></Show>
+        {showProjectName() ? <text fg={theme.paper}>{props.snapshot.project.name}</text> : null}
       </box>
       <box flexDirection="row" gap={1}>
         <text fg={active() ? theme.sage : theme.brass}>● {active() ? "AUTOPILOT ON" : "AUTOPILOT PAUSED"}</text>
-        <Show when={wide() && !twoColumn()}><text fg={theme.quiet}>· {props.snapshot.engine} · {props.snapshot.model}</text></Show>
+        {wide() && !twoColumn() ? <text fg={theme.quiet}>· {props.snapshot.engine} · {props.snapshot.model}</text> : null}
       </box>
     </box>
   )
@@ -553,8 +617,12 @@ export function TranscriptView(props: { transcript: SessionTranscript; rows: Dis
         <text fg={props.transcript.session.active ? theme.sage : theme.quiet}>{liveLabel()} · {sessionDate(props.transcript.session)}</text>
       </box>
       <Panel title={truncate(props.transcript.session.id, 58)} accent={props.transcript.session.active ? theme.sage : theme.sky} style={{ flexGrow: 1 }}>
-        <Show when={!props.transcript.truncated}><Show when={props.rows.length === 0}><text fg={theme.quiet}>This session has not emitted readable work yet.</text></Show></Show>
-        <Show when={props.transcript.truncated && props.offset === 0}><text fg={theme.brass}>Older output exceeds the 16 MB viewer window and is omitted.</text></Show>
+        {!props.transcript.truncated && props.rows.length === 0
+          ? <text fg={theme.quiet}>This session has not emitted readable work yet.</text>
+          : null}
+        {props.transcript.truncated && props.offset === 0
+          ? <text fg={theme.brass}>Older output exceeds the 16 MB viewer window and is omitted.</text>
+          : null}
         <For each={visible()}>{(row) => <text fg={transcriptColor[row.kind]}>{row.text}</text>}</For>
       </Panel>
       <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between" paddingX={1}>

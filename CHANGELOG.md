@@ -7,6 +7,22 @@ All notable software changes to AutoTao are recorded here. Mathematical work bel
 
 ### Added
 
+- An in-TUI usage-plan editor (`u`) persists the protected allowance and even/eager
+  pacing policy atomically, with a 5% minimum watchdog reserve.
+- The mature research-loop contracts from `new-math`: a durable 50/30/20 target ladder,
+  per-attempt credit/preemption checks, proof-first selection, adaptive agent rounds, and
+  bounded heavy computation via `scripts/safe-compute.sh`.
+- A reproducible `uv` verification environment and `scripts/selftest-harness.sh`, which
+  prevents future packaging work from silently dropping replacement-critical behavior.
+- `docs/MIGRATION.md` documents existing-workspace compatibility and target-state
+  translation from `new-math`.
+- The dashboard shows what the *running* attempt is doing, not just the last closed
+  one. It reads that attempt's `RESULT.md` — the artifact `harness/loop.md` requires it
+  to ship by the halfway mark — for the run's own attempt number, ambition tier, selected
+  target, section headings (its actual lines of attack) and its outcome paragraph. Before
+  that artifact exists it falls back to the newest agent message in the transcript. The
+  ledger's newest line is demoted to a "previously" line, since it describes the previous
+  attempt and frequently a different problem entirely.
 - The dashboard says what problem is being worked on, in words. It reads the problem
   file's title, an optional `## IN PLAIN TERMS` section, and the ACTIVE named target,
   and shows those instead of only a slug. `problems/TEMPLATE.md` documents the optional
@@ -18,12 +34,22 @@ All notable software changes to AutoTao are recorded here. Mathematical work bel
 
 ### Changed
 
+- Usage refreshes are serialized, throttled, OAuth-refresh aware, and honor Retry-After;
+  a newer interactive status-line sample can supply aggregate Claude limits without an
+  extra endpoint request.
+- Operational alerts and pending paper requests are visible in the TUI, rather than only
+  present in the headless snapshot.
 - A two-column dashboard above 100 columns: the header, usage plan and run status stack
   down a narrow left column, and the mathematics gets the whole right-hand side, where
   its text wraps instead of being cut off. Narrower terminals keep the previous layouts.
 
 ### Fixed
 
+- Codex solve runs use the current `--approve-for-me` interface, and
+  `RESUME_SESSION` now invokes `codex exec resume` instead of starting a fresh session.
+- The TUI and shell gate now both reject a projected run exactly at the launch ceiling.
+- Pre-launch orphan cleanup is wired into the only launch entrypoint; the reaper is no
+  longer a diagnostic that nothing calls.
 - Panel content that was taller than its panel spilled outside the border and painted
   over whatever occupied those rows, so two lines merged into one and read as corrupted
   text — `20h 23m elapsed` arriving as `208hi23moelapsed`. Panels now clip their content.
