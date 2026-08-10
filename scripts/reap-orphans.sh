@@ -12,7 +12,8 @@
 # Identification: ONLY processes the pipeline itself spawned. run-once.sh
 # exports AUTOTAO_RUN_ID before launching the run; the env is inherited through
 # fork/setsid/nohup, so detached compute still carries it after the run is
-# killed at RUN_TIMEOUT_MIN. We match on /proc/<pid>/environ.
+# killed at RUN_TIMEOUT_MIN. We match on the process's own environment
+# (/proc/<pid>/environ on Linux, `ps -E` on macOS — see scripts/portable.sh).
 #
 # This is deliberately NOT a cwd heuristic. Work started by hand — a fleet
 # babysitter, a census you kicked off yourself, anything you are nursing toward
@@ -36,6 +37,8 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 REPO="$PWD"
+source scripts/portable.sh
+at_require_bash || exit 1
 
 DO_KILL=0; OLDER_THAN=0; GRACE=10; QUIET=0
 # Never reap these: detached-by-design supervisors/babysitters.
@@ -58,25 +61,23 @@ descendants(){ local p="$1" kid
 
 # Sum %CPU over a pid and its whole subtree — the wrapper shell always reads
 # 0.0%; the work is in the children.
-tree_cpu(){ local p="$1"; { printf '%s\n' "$p"; descendants "$p"; } \
-  | xargs -r ps -o pcpu= -p 2>/dev/null | awk '{s+=$1} END{printf "%.1f", s}'; }
+tree_cpu(){ local p="$1"; local -a t; mapfile -t t < <(printf '%s\n' "$p"; descendants "$p")
+  at_ps_pids pcpu= "${t[@]}" | awk '{s+=$1} END{printf "%.1f", s}'; }
 
 # Best label for a root: the busiest command in its subtree, not the shell.
-tree_cmd(){ local p="$1"; { printf '%s\n' "$p"; descendants "$p"; } \
-  | xargs -r ps -o pcpu=,args= -p 2>/dev/null | sort -rn | head -1 \
+tree_cmd(){ local p="$1"; local -a t; mapfile -t t < <(printf '%s\n' "$p"; descendants "$p")
+  at_ps_pids pcpu=,args= "${t[@]}" | sort -rn | head -1 \
   | sed -E 's/^ *[0-9.]+ +//'; }
 
 # Protected if ANY command in the subtree matches REAP_EXCLUDE. Testing only the
 # busiest one is not enough: a babysitter spends its life in `sleep`, so its
 # subtree's top-CPU command is the sleep, not the babysitter — matching on that
 # alone would have made the GCP fleet's babysitter look reapable.
-tree_protected(){ local p="$1"
-  { printf '%s\n' "$p"; descendants "$p"; } \
-    | xargs -r ps -o args= -p 2>/dev/null | grep -qE "$REAP_EXCLUDE"; }
+tree_protected(){ local p="$1"; local -a t; mapfile -t t < <(printf '%s\n' "$p"; descendants "$p")
+  at_ps_pids args= "${t[@]}" | grep -qE "$REAP_EXCLUDE"; }
 
-# Was this process spawned by a pipeline run? (NUL-separated environ.)
-run_id_of(){ [[ -r "/proc/$1/environ" ]] || return 0   # other users' procs: not ours
-  cat "/proc/$1/environ" 2>/dev/null | tr '\0' '\n' | sed -n 's/^AUTOTAO_RUN_ID=//p' | head -1; }
+# Was this process spawned by a pipeline run?
+run_id_of(){ at_proc_env "$1" AUTOTAO_RUN_ID; }
 
 # pid<TAB>etimes<TAB>tree_cpu<TAB>cwd<TAB>run_id<TAB>cmd  for orphaned run-spawned roots
 find_orphans(){
@@ -85,12 +86,12 @@ find_orphans(){
     [[ "$ppid" == "1" ]] || continue          # launching session is gone
     (( et >= OLDER_THAN )) || continue
     rid=$(run_id_of "$pid"); [[ -n "$rid" ]] || continue   # pipeline-spawned only
-    cwd=$(readlink -f "/proc/$pid/cwd" 2>/dev/null) || cwd="$REPO"
+    cwd=$(at_proc_cwd "$pid"); [[ -n "$cwd" ]] || cwd="$REPO"
     [[ -e "$cwd/.noreap" ]] && continue
     tree_protected "$pid" && continue
     cmd=$(tree_cmd "$pid")
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$et" "$(tree_cpu "$pid")" "${cwd#$REPO/}" "$rid" "$cmd"
-  done < <(ps -eo pid=,ppid=,etimes=,pcpu=,args= 2>/dev/null)
+  done < <(at_ps_all)
 }
 
 mapfile -t ORPHANS < <(find_orphans)

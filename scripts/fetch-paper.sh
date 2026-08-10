@@ -31,6 +31,8 @@
 # never diagnose the publisher/source in problem files.
 set -uo pipefail
 cd "$(dirname "$0")/.."
+source scripts/portable.sh
+at_require_bash || exit 1
 P=papers; mkdir -p "$P"
 INDEX="$P/INDEX.tsv"
 WANTED="$P/WANTED.md"
@@ -98,7 +100,7 @@ HDR
 accept_pdf(){
   local src="$1" via="$2"
   mv "$src" "$P/$KEY.pdf"
-  BYTES=$(stat -c %s "$P/$KEY.pdf"); SHA=$(sha256sum "$P/$KEY.pdf" | cut -c1-16)
+  BYTES=$(at_file_size "$P/$KEY.pdf"); SHA=$(at_sha256 "$P/$KEY.pdf" | cut -c1-16)
   if [[ ! -s "$P/$KEY.txt" ]] && command -v pdftotext >/dev/null 2>&1; then
     pdftotext -q "$P/$KEY.pdf" "$P/$KEY.txt" 2>/dev/null && \
       echo "text: $P/$KEY.txt ($(wc -l < "$P/$KEY.txt") lines)"

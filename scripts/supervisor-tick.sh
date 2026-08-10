@@ -16,12 +16,14 @@
 # first-class root session.
 set -uo pipefail
 cd "$(dirname "$0")/.."
+source scripts/portable.sh
+at_require_bash || exit 1
 source scripts/env-sanitize.sh
 ENGINE="$(bash scripts/run-engine.sh)" || exit $?
 export RUN_ENGINE="$ENGINE"
 
 S=attempts/supervision; mkdir -p "$S" attempts/raw-logs
-exec 9>"$S/.tick.flock"; flock -n 9 || exit 0     # one tick at a time
+at_lock "$S/.tick.lock" || exit 0                 # one tick at a time
 log(){ echo "[tick $(date +%F-%H:%M:%S)] $*" >> "$S/tick.log"; }
 
 DISALLOWED="ScheduleWakeup,Monitor,CronCreate,CronDelete,CronList,PushNotification,SendMessage,RemoteTrigger,DesignSync,Workflow,WebFetch,WebSearch"
@@ -30,7 +32,7 @@ newest_log(){ ls -t attempts/raw-logs/*.log 2>/dev/null | head -1; }
 
 # Defer model spawns when the box is memory-starved: the state that made us
 # want to spawn persists (marker/flag untouched), so the next tick retries.
-mem_ok(){ local need="${1:-600}" avail; avail=$(free -m | awk '/^Mem:/{print $7}')
+mem_ok(){ local need="${1:-600}" avail; avail=$(at_avail_mem_mb)
   [[ "${avail:-0}" -ge "$need" ]] && return 0
   log "deferring model spawn: ${avail}MB available < ${need}MB floor"; return 1; }
 
@@ -41,7 +43,7 @@ result_info(){ bash scripts/result-info.sh "$1" 2>/dev/null; }
 # ---------- Tier 0 ----------
 RLOCK=attempts/.run.lock
 if [[ -f "$RLOCK" ]] && kill -0 "$(cat "$RLOCK" 2>/dev/null)" 2>/dev/null; then
-  NL=$(newest_log); AGE=$(( $(date +%s) - $(stat -c %Y "$NL" 2>/dev/null || echo 0) ))
+  NL=$(newest_log); AGE=$(( $(date +%s) - $(at_file_mtime "$NL") ))
   if (( AGE < 2700 )); then exit 0; fi                    # healthy live run
   log "run pid=$(cat "$RLOCK") presumed hung: newest log static ${AGE}s — killing + escalating"
   kill "$(cat "$RLOCK")" 2>/dev/null; sleep 5
@@ -82,7 +84,7 @@ the newest attempts/raw-logs/*.log). Execute ONE supervision cycle: diagnose, fi
 commit, and relaunch via 'bash scripts/launch.sh' ONLY if the fix is verified.
 The selected engine is $ENGINE. Do not start benchmarks. Keep attempts/LOG.md current.
 EOF
-  } | AGENT_DISALLOWED_TOOLS="$DISALLOWED" setsid timeout 45m \
+  } | AGENT_DISALLOWED_TOOLS="$DISALLOWED" "${AT_SETSID[@]}" "${AT_TIMEOUT[@]}" 45m \
     bash scripts/invoke-agent.sh "$ENGINE" "$T2_MODEL" \
     >> "$S/tier2-$(date +%Y%m%d-%H%M%S)-$ENGINE.log" 2>&1 &
   echo "$NL" > "$MARK"; exit 0
@@ -102,7 +104,7 @@ if [[ "$NL" != "$PREV" && -n "${ERR:-}" ]]; then
   # no reliable string to grep for. Detect the append by line-count delta instead.
   LOGN_BEFORE=$(wc -l < attempts/LOG.md 2>/dev/null || echo 0)
   rm -f "$S/decision"
-  AGENT_DISALLOWED_TOOLS="$DISALLOWED" setsid timeout 10m \
+  AGENT_DISALLOWED_TOOLS="$DISALLOWED" "${AT_SETSID[@]}" "${AT_TIMEOUT[@]}" 10m \
     bash scripts/invoke-agent.sh "$ENGINE" "$T1_MODEL" \
     < harness/triage.md \
     >> "$S/tier1-$(date +%Y%m%d-%H%M%S)-$ENGINE.log" 2>&1

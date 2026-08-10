@@ -7,6 +7,8 @@
 # Safe to call from cron; engine stdout goes to attempts/raw-logs/.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/portable.sh
+at_require_bash || exit 1
 
 ENGINE="$(bash "$(dirname "$0")/run-engine.sh" "${1:-}")"
 export RUN_ENGINE="$ENGINE"
@@ -26,7 +28,7 @@ for v in CLAUDECODE CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ID \
          CLAUDE_EFFORT AI_AGENT CLAUDE_CODE_SSE_PORT CLAUDE_CODE_TASK_ID; do
   unset "$v" 2>/dev/null || true
 done
-SETSID=(); command -v setsid >/dev/null && SETSID=(setsid)
+SETSID=("${AT_SETSID[@]}")
 
 # One-run-at-a-time lock (paired with should-run.sh's OOM guard). Stale locks from a
 # crashed run are cleared automatically (PID no longer alive).
@@ -157,7 +159,13 @@ fi
 
 if [[ -z "${RUN_TIMEOUT_MIN:-}" && "$TAG" == "loop" ]]; then RUN_TIMEOUT_MIN=90; fi
 TCMD=()
-[[ -n "${RUN_TIMEOUT_MIN:-}" ]] && TCMD=(timeout "${RUN_TIMEOUT_MIN}m")
+if [[ -n "${RUN_TIMEOUT_MIN:-}" ]]; then
+  # The wall cap is load-bearing, not advisory: harness/loop.md's ship-by-halfway
+  # discipline is derived from it, and a run that believes it has a deadline it
+  # does not have will pace itself wrongly. Refuse rather than run uncapped.
+  at_require_timeout || exit 3
+  TCMD=("${AT_TIMEOUT[@]}" "${RUN_TIMEOUT_MIN}m")
+fi
 
 # --- Tell the run its own deadline. Until 2026-07-26 nothing did, and the run had
 # no way to find out: `timeout` sends SIGTERM to the CLI, which cannot interrupt an
@@ -177,7 +185,7 @@ if [[ -n "${RUN_TIMEOUT_MIN:-}" ]]; then
 ## WALL CLOCK (injected by scripts/run-once.sh — binding)
 
 This process is killed with SIGTERM at **${RUN_TIMEOUT_MIN} minutes** wall time
-(started ${STAMP}, hard stop $(date -u -d "+${RUN_TIMEOUT_MIN} minutes" '+%H:%M UTC' 2>/dev/null || echo "start + ${RUN_TIMEOUT_MIN}m")). The kill is instant and
+(started ${STAMP}, hard stop $(at_deadline_utc "$RUN_TIMEOUT_MIN")). The kill is instant and
 uncatchable: you get no final turn, no chance to write files, no chance to log.
 Anything not on disk at that instant is lost, and salvaging it costs a later
 iteration an entire run.

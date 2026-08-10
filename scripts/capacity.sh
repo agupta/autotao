@@ -8,6 +8,8 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+source "$REPO/scripts/portable.sh"
+at_require_bash || exit 2
 
 # OOM guard (this box is 3.7GB; on 2026-07-23 the OOM killer took the supervisor
 # and its in-flight run when a run, its forked subagents, and a heavy check.py
@@ -16,7 +18,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 # the load-bearing knob against slowing the box is subagent concurrency (capped
 # at 3 in run-once.sh), not this floor.
 MEM_FLOOR_MB="${MEM_FLOOR_MB:-400}"
-AVAIL_MB=$(free -m | awk '/^Mem:/{print $7}')
+AVAIL_MB=$(at_avail_mem_mb)
 if [[ "${AVAIL_MB:-0}" -lt "$MEM_FLOOR_MB" ]]; then
   echo "available memory ${AVAIL_MB}MB < floor ${MEM_FLOOR_MB}MB — not launching (OOM guard)"
   exit 2
