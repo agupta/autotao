@@ -27,6 +27,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun --conditions=browser test",
     "build": "bun scripts/build.ts",
+    "demo": "bun --conditions=browser scripts/demo.tsx",
     "verify": "bun run typecheck && bun run test && bun run build"
   },
   "dependencies": {

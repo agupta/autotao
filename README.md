@@ -1,23 +1,57 @@
 # autotao — Autonomous Theorem Attack Orchestrator
 
-*Any resemblance to persons living, working, or holding Fields Medals is purely
-coincidental. Nobody it might bring to mind has endorsed or reviewed this project, or been
-asked to.*
-
 A research harness that works open mathematics problems **continuously** — around the
 clock, unattended — verifies whatever it produces, and logs every attempt as a permanent
-record.
+record, **especially the failures**.
+
+It is built for consumer AI budgets: a subscription plan and one box, not a lab's compute.
+That constraint shaped nearly every design decision below.
+
+<p align="center">
+  <img src="docs/demo.svg" alt="The AutoTao console through one iteration: holding under the usage runway, launching a checked run, working, and logging the failure." width="872">
+</p>
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/agupta/autotao/main/scripts/install.sh | sh
+```
+
+Then `git clone https://github.com/agupta/autotao`, `bash scripts/preflight.sh`, and read
+[Quickstart](#quickstart). Already installed? `autotao update`.
+
+**Linux and macOS**, x64 and arm64. Needs bash 4.4+ (macOS ships 3.2 — `brew install bash
+coreutils`), an authenticated `claude` or `codex` CLI, and Python 3 for verification
+scripts. `scripts/preflight.sh` checks all of it and names the fix for anything missing.
+
+*The name is a pun and nothing more. Any resemblance to persons living, working, or holding
+Fields Medals is coincidental. Nobody it might bring to mind has endorsed or reviewed this
+project, or been asked to.*
+
+## What it has actually produced
+
+Short answer: **this repository ships an empty ledger, and that is deliberate.**
+
+`problems/` contains a template and a rubric, not a curriculum. `attempts/LOG.md` contains
+the format and the rules, not results. The harness supplies the loop, the verification
+norms, the supervision layer, and the methods for *finding* problems worth attempting — the
+problem set and the ledger are yours, and on a private operator workspace they stay yours
+(see [Quickstart](#quickstart); `.autotao/workspace/` is gitignored for exactly this reason).
+
+<!-- TODO(launch): the honest answer to "what has it found?" belongs here, in numbers, before
+     this goes anywhere public. Fill in from your own workspace ledger, e.g.:
+       - N runs over M months, of which: X partial, Y fragment, Z failed, 0 resolved
+       - the ladder of lower bounds, with the actual bound and how many runs it took
+       - what a referee would say about the strongest artifact
+     If the honest answer is "no new theorems," say that plainly and lead with the
+     denominator. It is a far stronger position than implying more. -->
+
+What it has *not* produced is a resolved named conjecture, and nothing here should be read
+as claiming otherwise. The escalation rules in `verify/README.md` require an expert human
+read before any public claim on a named problem, and the harness prompts forbid an
+unattended run from making one at all.
 
 **You steer it.** Which problems it works on, which target on each problem, and in what
 order are all yours: a priority list in `LOOP_STATE.md` overrides everything, and takes
 effect on the next iteration. Point it somewhere and it stays pointed until you move it.
-
-**It ships with no problems.** The problem set is yours too — `problems/` contains a
-template and a rubric, not a curriculum. The harness supplies the loop, the verification
-norms, the supervision layer, and the methods for *finding* problems worth attempting.
-
-**It is built for consumer AI budgets** — a subscription plan and one box, not a lab's
-compute. That constraint shaped nearly every design decision below.
 
 ## What it actually does
 
@@ -134,10 +168,59 @@ scripts/             — runner, launch gate, budget/memory guards, orphan reape
 LOOP_STATE.md        — iteration counter, priority queue, run model, push authorization
 ```
 
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/agupta/autotao/main/scripts/install.sh | sh
+```
+
+This installs the `autotao` console binary to `~/.local/bin` (override with
+`AUTOTAO_BIN_DIR`). It verifies a published SHA-256 checksum and runs the binary once
+before installing it. Binaries are built by
+[`.github/workflows/release.yml`](.github/workflows/release.yml) on GitHub-hosted runners
+and published with `SHA256SUMS`.
+
+The console is the supervisor; the harness itself — prompts, rubric, scripts — lives in the
+repository, so clone it too:
+
+```sh
+git clone https://github.com/agupta/autotao && cd autotao
+bash scripts/preflight.sh
+```
+
+**Updating.** `autotao update` replaces the binary in place, after checksum verification
+and a startup probe of the download. `autotao update --check` reports without installing.
+The console checks for a new release at most once a day and shows a notice in its idle
+status row; set `AUTOTAO_NO_UPDATE_CHECK=1` to turn that off. Harness files are updated
+with `git pull` — deliberately separate, so an update can never rewrite prompts you have
+tuned or touch your workspace.
+
+### Build from source
+
+Needs Bun 1.2+. Release binaries do not.
+
+```sh
+cd apps/autotao
+bun install --frozen-lockfile
+bun run verify        # typecheck, tests, standalone build
+```
+
+### Platform support
+
+| | x64 | arm64 |
+|---|---|---|
+| Linux (glibc) | ✅ | ✅ |
+| macOS | ✅ | ✅ |
+| Linux (musl/Alpine) | build from source | build from source |
+| Windows | — | — |
+
+macOS needs bash 4.4+ and GNU `timeout`, neither of which it ships: `brew install bash
+coreutils`. It has no `setsid`, which the harness accounts for — runs still detach, they
+just share a session with their launcher. `scripts/preflight.sh` reports all of this.
+
 ## Quickstart
 
-Requires an agent CLI (Claude Code and/or Codex) already authenticated, Bun 1.2 or newer
-for the source console (standalone release binaries do not require Bun), plus a Python
+Requires an agent CLI (Claude Code and/or Codex) already authenticated, plus a Python
 environment for the verification scripts:
 
 ```bash
