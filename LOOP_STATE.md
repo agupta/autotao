@@ -7,7 +7,7 @@ steering wheel** — the `priority:` list below overrides index rotation entirel
 iteration: 0
 last_problem: none
 sourcing_counter: 0
-run_model: claude-opus-5
+run_model: claude-fable-5
 ```
 
 - **iteration** — incremented by each loop iteration.
