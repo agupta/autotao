@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import type { TestRendererSetup } from "@opentui/core/testing"
-import { Dashboard, SessionBrowser, TranscriptView, formatTranscriptRows } from "../src/app.tsx"
+import { Dashboard, SessionBrowser, TranscriptView, UsageSettings, formatTranscriptRows } from "../src/app.tsx"
 import type { ProjectSnapshot, SessionSummary, SessionTranscript } from "../src/protocol.ts"
 
 const snapshot: ProjectSnapshot = {
@@ -100,7 +100,22 @@ describe("dashboard layout", () => {
 
     expect(frame).toContain("HOW AUTOTAO DECIDES")
     expect(frame).toContain("normal usage counts")
+    expect(frame).toContain("u change usage plan")
     expect(frame).toContain("Space pause/resume")
+  })
+
+  test("presents usage limits as protected allowance and pacing", async () => {
+    setup = await testRender(() => (
+      <UsageSettings policy={{ reservePercent: 15, pace: "even" }} width={80} />
+    ), { width: 80, height: 24 })
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+
+    expect(frame).toContain("USAGE PLAN")
+    expect(frame).toContain("15% protected for you")
+    expect(frame).toContain("use up to 85%")
+    expect(frame).toContain("Even mode")
+    expect(frame).toContain("Enter save")
   })
 
   test("gives action feedback its own unclipped status row", async () => {
@@ -118,6 +133,16 @@ describe("dashboard layout", () => {
     expect(frame).toContain("✓ Maintenance finished")
     expect(frame).toContain("Enter live work")
     expect(frame).not.toContain("Maintenance finis…")
+  })
+
+  test("surfaces operational alerts without hiding them in snapshot JSON", async () => {
+    setup = await testRender(() => (
+      <Dashboard snapshot={{ ...snapshot, alerts: ["Tier-2 escalation is pending"] }} width={80} autoLaunch />
+    ), { width: 80, height: 24 })
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+
+    expect(frame).toContain("! Tier-2 escalation is pending")
   })
 
   test("wraps the complete mathematical target instead of ellipsizing it", async () => {
