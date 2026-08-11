@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import type { TestRendererSetup } from "@opentui/core/testing"
-import { Dashboard, SessionBrowser, TranscriptView, UsageSettings, formatTranscriptRows } from "../src/app.tsx"
+import { Dashboard, SessionBrowser, TranscriptView, UsageSettings, dashboardMetrics, formatTranscriptRows, problemRows } from "../src/app.tsx"
 import type { ProjectSnapshot, SessionSummary, SessionTranscript } from "../src/protocol.ts"
 
 const snapshot: ProjectSnapshot = {
@@ -77,7 +77,7 @@ describe("dashboard layout", () => {
     [80, 24],
     [140, 40],
   ])("renders the complete campaign-free dashboard at %dx%d", async (width, height) => {
-    setup = await testRender(() => <Dashboard snapshot={snapshot} width={width} autoLaunch />, { width, height })
+    setup = await testRender(() => <Dashboard snapshot={snapshot} width={width} height={height} autoLaunch />, { width, height })
     await setup.renderOnce()
     const frame = setup.captureCharFrame()
 
@@ -93,8 +93,108 @@ describe("dashboard layout", () => {
     expect(frame).not.toContain("CAMPAIGN")
   })
 
+  test.each([
+    [80, 24],
+    [89, 31],
+    [140, 40],
+  ])("gives the problem the full height beside a stacked usage plan at %dx%d", async (width, height) => {
+    setup = await testRender(() => <Dashboard snapshot={snapshot} width={width} height={height} autoLaunch />, { width, height })
+    await setup.renderOnce()
+    const rows = setup.captureCharFrame().split("\n")
+    const rowOf = (needle: string) => rows.findIndex((row) => row.includes(needle))
+
+    // The usage figures read down the narrow column, one to a row.
+    expect(rows.some((row) => row.includes("20% used · finish at 95%"))).toBe(true)
+    // NOW sits at the foot of that column, well below the usage plan…
+    expect(rowOf("─ NOW ─")).toBeGreaterThan(rowOf("YOUR USAGE PLAN"))
+    // …and the problem panel is still open beside it, so nothing on the left
+    // caps how much mathematics the right-hand column can show.
+    expect(rows[rowOf("─ NOW ─")]).toMatch(/│\s*$/)
+    // The name and the autopilot state live in the narrow column, a line each,
+    // so the problem panel starts at the very top of the screen.
+    expect(rowOf("THE PROBLEM BEING WORKED ON")).toBeLessThan(rowOf("YOUR USAGE PLAN"))
+    expect(rowOf("◆ AUTOTAO")).toBeGreaterThan(rowOf("THE PROBLEM BEING WORKED ON"))
+    expect(rowOf("AUTOPILOT ON")).toBeGreaterThan(rowOf("◆ AUTOTAO"))
+  })
+
+  test("keeps NOW below the problem in one column", async () => {
+    setup = await testRender(() => <Dashboard snapshot={snapshot} width={70} height={30} autoLaunch />, { width: 70, height: 30 })
+    await setup.renderOnce()
+    const rows = setup.captureCharFrame().split("\n")
+    const rowOf = (needle: string) => rows.findIndex((row) => row.includes(needle))
+
+    expect(rowOf("─ NOW ─")).toBeGreaterThan(rowOf("THE PROBLEM BEING WORKED ON"))
+    expect(rows.some((row) => row.includes("1h 2m elapsed · last output 8s ago"))).toBe(true)
+  })
+
+  const busy: ProjectSnapshot = {
+    ...snapshot,
+    problemBrief: {
+      slug: "sample-problem",
+      title: "Maximum independent sets in flag spheres",
+      plain: "How large can an independent set be in the graph of a flag simplicial sphere? The question asks for the exact growth rate rather than an asymptotic bound.",
+      activeTarget: "Prove the exact bound for every admissible dimension, with a proof that survives hostile verification.",
+    },
+    liveAttempt: {
+      directory: "/tmp/attempt-138",
+      problem: "sample-problem",
+      title: "Maximum independent sets in flag spheres",
+      attempt: 138,
+      tier: "F",
+      target: "T2",
+      outcome: null,
+      approaches: ["Global three-colour incidence", "Topology of carrier conflicts", "Exact empty-triangle ledger"],
+      latestActivity: "The live gate is CLEAR: the defining record still claims only the weaker result, so the harness is opening three independent proof lanes and will reconcile them against the retained ledger before it writes anything down.",
+    },
+  }
+
+  test("scrolls the problem text instead of clipping what does not fit", async () => {
+    const { mainText, bodyRows } = dashboardMetrics(94, 31)
+    const all = problemRows(busy, mainText)
+    expect(all.length).toBeGreaterThan(bodyRows)
+    // The last row is reachable: the end of the text lands on the last row of
+    // the panel rather than one past it.
+    expect(all.at(-1)?.text).toBe("Enter opens the complete work transcript")
+
+    setup = await testRender(() => (
+      <Dashboard snapshot={busy} width={94} height={31} problemOffset={0} autoLaunch />
+    ), { width: 94, height: 31 })
+    await setup.renderOnce()
+    const top = setup.captureCharFrame()
+
+    expect(top).toContain("WHAT THE PROBLEM IS")
+    expect(top).toContain(`↑↓ 1–${bodyRows}/${all.length}`)
+    expect(top).not.toContain("Enter opens the complete work transcript")
+    // The heading is pinned, so a scrolled panel still says what it is about.
+    expect(top).toContain("Maximum independent sets in flag spheres")
+  })
+
+  test("clamps a scroll past the end to the last screenful", async () => {
+    const { mainText, bodyRows } = dashboardMetrics(94, 31)
+    const all = problemRows(busy, mainText)
+    setup = await testRender(() => (
+      <Dashboard snapshot={busy} width={94} height={31} problemOffset={9_000} autoLaunch />
+    ), { width: 94, height: 31 })
+    await setup.renderOnce()
+    const bottom = setup.captureCharFrame()
+
+    expect(bottom).toContain(`↑↓ ${all.length - bodyRows + 1}–${all.length}/${all.length}`)
+    expect(bottom).toContain("Enter opens the complete work transcript")
+    expect(bottom).not.toContain("WHAT THE PROBLEM IS")
+    expect(bottom).toContain("Maximum independent sets in flag spheres")
+  })
+
+  test("leaves the title alone when the whole problem fits", async () => {
+    setup = await testRender(() => <Dashboard snapshot={snapshot} width={94} height={40} autoLaunch />, { width: 94, height: 40 })
+    await setup.renderOnce()
+    const frame = setup.captureCharFrame()
+
+    expect(frame).toContain("THE PROBLEM BEING WORKED ON ─")
+    expect(frame).not.toContain("↑↓ 1–")
+  })
+
   test("explains the policy and every persistent control in product language", async () => {
-    setup = await testRender(() => <Dashboard snapshot={snapshot} width={80} autoLaunch help />, { width: 80, height: 24 })
+    setup = await testRender(() => <Dashboard snapshot={snapshot} width={80} height={24} autoLaunch help />, { width: 80, height: 24 })
     await setup.renderOnce()
     const frame = setup.captureCharFrame()
 
@@ -123,6 +223,7 @@ describe("dashboard layout", () => {
       <Dashboard
         snapshot={snapshot}
         width={80}
+        height={24}
         autoLaunch
         message={{ ok: true, summary: "Maintenance finished", output: "" }}
       />
@@ -137,7 +238,7 @@ describe("dashboard layout", () => {
 
   test("surfaces operational alerts without hiding them in snapshot JSON", async () => {
     setup = await testRender(() => (
-      <Dashboard snapshot={{ ...snapshot, alerts: ["Tier-2 escalation is pending"] }} width={80} autoLaunch />
+      <Dashboard snapshot={{ ...snapshot, alerts: ["Tier-2 escalation is pending"] }} width={80} height={24} autoLaunch />
     ), { width: 80, height: 24 })
     await setup.renderOnce()
     const frame = setup.captureCharFrame()
@@ -151,7 +252,7 @@ describe("dashboard layout", () => {
       ...snapshot,
       ledger: { ...snapshot.ledger!, target: longTarget, outcome: "Hostile verification remains in progress." },
     }
-    setup = await testRender(() => <Dashboard snapshot={completeSnapshot} width={80} autoLaunch />, { width: 80, height: 24 })
+    setup = await testRender(() => <Dashboard snapshot={completeSnapshot} width={80} height={24} autoLaunch />, { width: 80, height: 24 })
     await setup.renderOnce()
     const frame = setup.captureCharFrame()
 
@@ -165,7 +266,7 @@ describe("dashboard layout", () => {
       ...snapshot,
       project: { ...snapshot.project, name: "autotao", adapter: "autotao" },
     }
-    setup = await testRender(() => <Dashboard snapshot={nativeSnapshot} width={80} autoLaunch />, { width: 80, height: 24 })
+    setup = await testRender(() => <Dashboard snapshot={nativeSnapshot} width={80} height={24} autoLaunch />, { width: 80, height: 24 })
     await setup.renderOnce()
     const frame = setup.captureCharFrame()
 

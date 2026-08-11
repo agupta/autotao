@@ -70,14 +70,17 @@ function usageSentence(snapshot: ProjectSnapshot, nextRunFits: boolean): { text:
   return { text: "On pace — waiting before the next run", color: theme.sage }
 }
 
-function UsagePlan(props: { snapshot: ProjectSnapshot; width: number; stacked?: boolean }) {
+function UsagePlan(props: { snapshot: ProjectSnapshot; width: number; stacked?: boolean; dense?: boolean }) {
   const plan = createMemo(() => usageRunway(props.snapshot.gate, new Date(props.snapshot.sampledAt).getTime()))
   const primary = () => plan().primary
   const status = () => usageSentence(props.snapshot, plan().nextRunFits)
   const barWidth = () => Math.max(16, Math.min(76, props.width - (props.stacked ? 6 : 10)))
-  // Stacked in a narrow column: the four figures read as a list rather than a
-  // row that would have to be squeezed or truncated.
-  const height = () => props.stacked ? 11 : props.width >= 108 ? 6 : 5
+  // Stacked in a narrow column: the figures read as a list rather than a row
+  // that would have to be squeezed or truncated. On a short terminal the list
+  // drops to the figures alone — the panel keeps a fixed height either way,
+  // because a shrunk panel paints its last rows over each other rather than
+  // clipping them.
+  const height = () => props.stacked ? (props.dense ? 8 : 10) : props.width >= 108 ? 6 : 5
   return (
     <Panel title="YOUR USAGE PLAN" accent={theme.sky} style={{ height: height(), flexShrink: 0 }}>
       <Show when={primary()} fallback={
@@ -97,7 +100,9 @@ function UsagePlan(props: { snapshot: ProjectSnapshot; width: number; stacked?: 
               <text height={wrapParagraph(status().text, barWidth()).length} flexShrink={0} fg={status().color}>
                 <strong>{wrapParagraph(status().text, barWidth()).join("\n")}</strong>
               </text>
-              <text height={1} flexShrink={0} fg={theme.quiet}>{runway().tank.label}</text>
+              {!props.dense ? (
+                <text height={1} flexShrink={0} fg={theme.quiet}>{runway().tank.label}</text>
+              ) : null}
             </Show>
             <RunwayBar
               used={runway().tank.used ?? 0}
@@ -113,11 +118,14 @@ function UsagePlan(props: { snapshot: ProjectSnapshot; width: number; stacked?: 
                 <text fg={theme.reserve}>{Math.max(0, 100 - Math.round(runway().tank.finishAt))}% protected</text>
               </box>
             }>
-              <text height={1} flexShrink={0} fg={theme.sage}>{`${Math.round(runway().tank.used ?? 0)}% used`}</text>
+              {/* Each row is one string in one child. Two spans in a column
+                  this narrow have been observed to paint over each other. */}
+              <text height={1} flexShrink={0} fg={theme.sage}>{`${Math.round(runway().tank.used ?? 0)}% used · finish at ${Math.round(runway().tank.finishAt)}%`}</text>
               <text height={1} flexShrink={0} fg={theme.sky}>{runway().paced ? `${Math.round(runway().paceAt)}% pace right now` : "use spare capacity now"}</text>
-              <text height={1} flexShrink={0} fg={theme.paper}>{`finish at ${Math.round(runway().tank.finishAt)}%`}</text>
-              <text height={1} flexShrink={0} fg={theme.reserve}>{`${Math.max(0, 100 - Math.round(runway().tank.finishAt))}% protected`}</text>
-              <text height={1} flexShrink={0} fg={theme.quiet}>{resetLabel(runway().tank, new Date(props.snapshot.sampledAt).getTime())}</text>
+              <text height={1} flexShrink={0} fg={theme.reserve}>{`${Math.max(0, 100 - Math.round(runway().tank.finishAt))}% protected for you`}</text>
+              {!props.dense ? (
+                <text height={1} flexShrink={0} fg={theme.quiet}>{resetLabel(runway().tank, new Date(props.snapshot.sampledAt).getTime())}</text>
+              ) : null}
             </Show>
             {!props.stacked && props.width >= 108 ? (
               <box flexDirection="row" justifyContent="space-between">
@@ -132,9 +140,22 @@ function UsagePlan(props: { snapshot: ProjectSnapshot; width: number; stacked?: 
   )
 }
 
-function NowPanel(props: { snapshot: ProjectSnapshot; textWidth: number; compact?: boolean; style?: Record<string, unknown> }) {
+function NowPanel(props: { snapshot: ProjectSnapshot; textWidth: number; compact?: boolean; dense?: boolean; style?: Record<string, unknown> }) {
   const running = () => props.snapshot.run.phase === "running"
   const latestEvent = () => props.snapshot.pipeline.at(-1)?.message
+  // One row for both timings, in the longest wording that fits the column —
+  // cutting the sentence short would leave "last outp…", which says nothing.
+  const timings = () => {
+    const elapsed = duration(props.snapshot.run.elapsedSeconds)
+    const last = duration(props.snapshot.run.lastWriteSeconds)
+    const wordings = [
+      `${elapsed} elapsed · last output ${last} ago`,
+      `${elapsed} · last output ${last} ago`,
+      `${elapsed} · output ${last} ago`,
+      `${elapsed} · ${last}`,
+    ]
+    return wordings.find((wording) => wording.length <= props.textWidth) ?? wordings[wordings.length - 1]!
+  }
   return (
     <Panel title="NOW" accent={running() ? theme.sage : theme.border} style={props.style ?? { width: "100%", flexShrink: 0 }}>
       {/* Every line below is a single string child on purpose. Splitting one
@@ -147,8 +168,16 @@ function NowPanel(props: { snapshot: ProjectSnapshot; textWidth: number; compact
       <Show when={running()} fallback={
         <text height={1} flexShrink={0} fg={theme.quiet}>AutoTao checks again automatically.</text>
       }>
-        <text height={1} flexShrink={0} fg={theme.quiet}>{`${duration(props.snapshot.run.elapsedSeconds)} elapsed`}</text>
-        <text height={1} flexShrink={0} fg={theme.quiet}>{`last output ${duration(props.snapshot.run.lastWriteSeconds)} ago`}</text>
+        {/* On a short terminal the two timings share a row, so the panel keeps
+            to two lines and the column beside it still ends where it should. */}
+        <Show when={props.dense} fallback={
+          <>
+            <text height={1} flexShrink={0} fg={theme.quiet}>{`${duration(props.snapshot.run.elapsedSeconds)} elapsed`}</text>
+            <text height={1} flexShrink={0} fg={theme.quiet}>{`last output ${duration(props.snapshot.run.lastWriteSeconds)} ago`}</text>
+          </>
+        }>
+          <text height={1} flexShrink={0} fg={theme.quiet}>{truncate(timings(), props.textWidth)}</text>
+        </Show>
       </Show>
       {/* Stacked under the problem panel, this is a status strip and must not
           take room the mathematics needs. */}
@@ -191,159 +220,149 @@ function WrappedText(props: { body: string; width: number; fg?: string }) {
   )
 }
 
-/** A labelled block of wrapped prose. Nothing is truncated; long text wraps. */
-function Section(props: { label: string; body: string; width: number; fg?: string }) {
-  return (
-    <box flexDirection="column" flexShrink={0}>
-      <text height={1} flexShrink={0} fg={theme.reserve}>{props.label}</text>
-      <WrappedText body={props.body} width={props.width} fg={props.fg} />
-      <text height={1} flexShrink={0}> </text>
-    </box>
-  )
+export interface ProblemRow {
+  text: string
+  fg: string
+  bold?: boolean
 }
 
-function LastAttemptPanel(props: { snapshot: ProjectSnapshot; textWidth: number; style?: Record<string, unknown> }) {
-  const verdict = () => props.snapshot.ledger?.verdict.toLowerCase() ?? ""
-  const verdictColor = () => /resolved|pass|partial|closed/.test(verdict()) ? theme.sage : /fail|invalid/.test(verdict()) ? theme.coral : theme.brass
-  const brief = () => props.snapshot.problemBrief ?? null
-  const live = () => props.snapshot.liveAttempt ?? null
-  const coordinates = createMemo(() => parseAttemptTarget(props.snapshot.ledger?.target ?? ""))
+/**
+ * The body of the problem panel as one row per painted line.
+ *
+ * The panel is nearly always taller than its box, so the rows have to be a
+ * value the dashboard can slice and the key handler can measure — laying the
+ * sections out as nested boxes left everything past the last visible row
+ * silently clipped, with no way to reach it.
+ */
+export function problemRows(snapshot: ProjectSnapshot, width: number): ProblemRow[] {
+  const ledger = snapshot.ledger
+  if (!ledger) return [{ text: "No attempt yet. Add a problem, then AutoTao can begin.", fg: theme.quiet }]
 
-  // While a run is in flight it is what the operator cares about. The ledger's
-  // newest line is the *previous* attempt — often a different target at a
-  // different ambition tier — so it is demoted rather than shown as current.
-  const liveSummary = createMemo(() => {
-    const attempt = live()
-    if (!attempt) return null
+  const brief = snapshot.problemBrief ?? null
+  const live = snapshot.liveAttempt ?? null
+  const coordinates = parseAttemptTarget(ledger.target ?? "")
+  const clean = (value: string) => value.replace(/[`*_]/g, "").trim()
+  const rows: ProblemRow[] = []
+  const blank = () => rows.push({ text: " ", fg: theme.quiet })
+  const section = (label: string, body: string, fg: string = theme.paper) => {
+    rows.push({ text: label, fg: theme.reserve })
+    for (const line of wrapParagraph(body, width)) rows.push({ text: line, fg })
+    blank()
+  }
+
+  // The slug is an identifier, not a description. Prefer the problem file's own
+  // title, which is written for humans. The running run's problem, not the
+  // ledger's — they differ whenever the rotation has moved on.
+  const problem = live?.problem ?? ledger.problem ?? ""
+  const heading = brief?.title ?? problem
+  // The verdict shares the first line, so only that line is narrowed for it.
+  const headingLines = wrapParagraph(heading, Math.max(10, width - 10))
+  for (const line of headingLines.slice(1)) rows.push({ text: line, fg: theme.paper, bold: true })
+  // The slug is only worth a line when it is not already the heading.
+  if (heading !== problem) rows.push({ text: problem, fg: theme.reserve })
+  blank()
+
+  // Written for a mathematician outside the subfield, when the problem file
+  // supplies one.
+  if (brief?.plain) section("WHAT THE PROBLEM IS", brief.plain, theme.paper)
+
+  // What a result would have to establish, in the problem file's own words.
+  // Suppressed while a run is live until that run has said which target it
+  // picked: the problem file's ACTIVE target need not be the one this run
+  // chose, and the ledger's is a different attempt on possibly a different
+  // problem. Showing either would be a confident statement about the wrong
+  // thing.
+  const activeTarget = (!live || live.target) ? brief?.activeTarget : null
+  if (activeTarget) section("WHAT A RESULT WOULD HAVE TO SHOW", activeTarget, theme.quiet)
+  else if (!live && coordinates.statement) section("WHAT THIS ATTEMPT WENT AFTER", coordinates.statement, theme.paper)
+
+  // While a run is in flight it is what the operator cares about, so the
+  // ledger's newest line — often a different target at a different ambition
+  // tier — is demoted rather than shown as current.
+  const liveSummary = (() => {
+    if (!live) return null
     const parts: string[] = []
-    if (attempt.attempt != null) parts.push(`Attempt ${attempt.attempt}`)
-    if (attempt.target) parts.push(`target ${attempt.target}`)
-    const tier = tierLabel(attempt.tier)
+    if (live.attempt != null) parts.push(`Attempt ${live.attempt}`)
+    if (live.target) parts.push(`target ${live.target}`)
+    const tier = tierLabel(live.tier)
     if (tier) parts.push(`going for ${tier}`)
     return parts.length ? parts.join(" · ") : null
-  })
+  })()
+  const summary = live ? liveSummary : attemptSummary(coordinates)
+  if (summary) {
+    rows.push({ text: live ? "THIS RUN" : "THIS ATTEMPT", fg: theme.reserve })
+    rows.push({ text: truncate(summary, width), fg: theme.sky })
+    const detail = tierDetail(live?.tier ?? coordinates.tier)
+    if (detail) for (const line of wrapParagraph(detail, width)) rows.push({ text: line, fg: theme.quiet })
+    blank()
+  }
 
-  // The slug is an identifier, not a description. Prefer the problem file's
-  // own title, which is written for humans.
-  // The running run's problem, not the ledger's — they differ whenever the
-  // rotation has moved on, which is most of the time.
-  const currentProblem = () => live()?.problem ?? props.snapshot.ledger?.problem ?? ""
-  const heading = () => brief()?.title ?? currentProblem()
-  // The verdict shares the first line, so only that line is narrowed for it.
-  const headingLines = createMemo(() => wrapParagraph(heading(), Math.max(10, props.textWidth - 10)))
-  const outcome = (value: string) => value.replace(/[`*_]/g, "").trim()
+  // The running run's own section headings: the lines of attack it is
+  // pursuing, in the words it gave them.
+  if ((live?.approaches.length ?? 0) > 0) {
+    rows.push({ text: "WHAT IT IS TRYING", fg: theme.reserve })
+    for (const approach of live?.approaches ?? []) {
+      for (const line of wrapParagraph(`• ${approach}`, width)) rows.push({ text: line, fg: theme.paper })
+    }
+    blank()
+  }
+
+  // While a run is live, where it has got to comes from the artifact
+  // harness/loop.md requires it to ship by the halfway mark; before that
+  // exists, the newest thing it said.
+  if (live) {
+    const progress = live.outcome ?? live.latestActivity
+    if (progress) section(live.outcome ? "WHERE IT HAS GOT TO" : "MOST RECENT ACTIVITY", clean(progress), theme.quiet)
+    rows.push({ text: truncate(`Previously: ${ledger.problem} — ${ledger.verdict}`, width), fg: theme.reserve })
+  } else {
+    section("HOW IT WENT", clean(ledger.outcome), theme.quiet)
+  }
+
+  rows.push({ text: "Enter opens the complete work transcript", fg: theme.sky })
+  return rows
+}
+
+function LastAttemptPanel(props: {
+  snapshot: ProjectSnapshot
+  textWidth: number
+  bodyRows: number
+  offset?: number
+  style?: Record<string, unknown>
+}) {
+  const verdict = () => props.snapshot.ledger?.verdict.toLowerCase() ?? ""
+  const verdictColor = () => /resolved|pass|partial|closed/.test(verdict()) ? theme.sage : /fail|invalid/.test(verdict()) ? theme.coral : theme.brass
+  const live = () => props.snapshot.liveAttempt ?? null
+  const brief = () => props.snapshot.problemBrief ?? null
+  const problem = () => live()?.problem ?? props.snapshot.ledger?.problem ?? ""
+  const headingLine = () => wrapParagraph(brief()?.title ?? problem(), Math.max(10, props.textWidth - 10))[0] ?? ""
+
+  const rows = createMemo(() => problemRows(props.snapshot, props.textWidth))
+  const offset = () => Math.max(0, Math.min(props.offset ?? 0, Math.max(0, rows().length - props.bodyRows)))
+  const visible = createMemo(() => rows().slice(offset(), offset() + props.bodyRows))
+  // Where you are in the text, so scrolled-away rows are visibly there rather
+  // than simply missing.
+  const title = () => rows().length > props.bodyRows
+    ? `THE PROBLEM BEING WORKED ON · ↑↓ ${offset() + 1}–${Math.min(rows().length, offset() + props.bodyRows)}/${rows().length}`
+    : "THE PROBLEM BEING WORKED ON"
 
   return (
-    <Panel title="THE PROBLEM BEING WORKED ON" accent={verdictColor()} style={props.style ?? { width: "100%", flexGrow: 1 }}>
-      <Show when={props.snapshot.ledger} fallback={
-        <text fg={theme.quiet}>No attempt yet. Add a problem, then AutoTao can begin.</text>
-      }>
-        {(ledger) => (
-          <box flexDirection="column">
-            {/* The verdict sits on the first line, so only that line has to
-                leave room for it; the title wraps into the full width below
-                rather than being cut off. */}
-            <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
-              <text fg={theme.paper}><strong>{headingLines()[0]}</strong></text>
-              <text fg={live() ? theme.sage : verdictColor()}>{live() ? "RUNNING" : ledger().verdict.toUpperCase()}</text>
-            </box>
-            {headingLines().length > 1 ? (
-              <text height={headingLines().length - 1} flexShrink={0} fg={theme.paper}>
-                <strong>{headingLines().slice(1).join("\n")}</strong>
-              </text>
-            ) : null}
-            {/* The slug is only worth a line when it is not already the
-                heading — otherwise it is the same string twice. */}
-            {heading() !== currentProblem() ? (
-              <text height={1} flexShrink={0} fg={theme.reserve}>{currentProblem()}</text>
-            ) : null}
-            <text height={1} flexShrink={0}> </text>
-
-            {/* Written for a mathematician outside the subfield, when the
-                problem file supplies one. */}
-            {brief()?.plain
-              ? <Section label="WHAT THE PROBLEM IS" body={brief()?.plain ?? ""} width={props.textWidth} />
-              : null}
-
-            {/* What a result would have to establish, in the problem file's own
-                words — including the constraints a proof has to satisfy.
-                Suppressed while a run is live until that run has said which
-                target it picked: the problem file's ACTIVE target need not be
-                the one this run chose, and the ledger's is a different attempt
-                on possibly a different problem. Showing either would be a
-                confident statement about the wrong thing. */}
-            <Show when={!live() || live()?.target ? brief()?.activeTarget : null} fallback={
-              !live() && coordinates().statement
-                ? <Section label="WHAT THIS ATTEMPT WENT AFTER" body={coordinates().statement} width={props.textWidth} />
-                : null
-            }>
-              {(target) => <Section label="WHAT A RESULT WOULD HAVE TO SHOW" body={target()} width={props.textWidth} fg={theme.quiet} />}
-            </Show>
-
-            {(live() ? liveSummary() : attemptSummary(coordinates())) ? (
-                <box flexDirection="column" flexShrink={0}>
-                  <text height={1} flexShrink={0} fg={theme.reserve}>{live() ? "THIS RUN" : "THIS ATTEMPT"}</text>
-                  <text height={1} flexShrink={0} fg={theme.sky}>
-                    {truncate((live() ? liveSummary() : attemptSummary(coordinates())) ?? "", props.textWidth)}
-                  </text>
-                  {/* Through WrappedText, whose line count is a memo. Computing
-                      the height eagerly here dropped the last wrapped line:
-                      the row was reserved but never painted. */}
-                  {tierDetail(live()?.tier ?? coordinates().tier)
-                    ? <WrappedText body={tierDetail(live()?.tier ?? coordinates().tier) ?? ""} width={props.textWidth} fg={theme.quiet} />
-                    : null}
-                  <text height={1} flexShrink={0}> </text>
-                </box>
-            ) : null}
-
-            {/* The running run's own section headings: the lines of attack it
-                is pursuing, in the words it gave them. */}
-            {(live()?.approaches.length ?? 0) > 0 ? (
-              <box flexDirection="column" flexShrink={0}>
-                <text height={1} flexShrink={0} fg={theme.reserve}>WHAT IT IS TRYING</text>
-                <For each={live()?.approaches ?? []}>
-                  {(approach) => (
-                    <text height={1} flexShrink={0} fg={theme.paper}>{truncate(`• ${approach}`, props.textWidth)}</text>
-                  )}
-                </For>
-                <text height={1} flexShrink={0}> </text>
-              </box>
-            ) : null}
-
-            {/* While a run is live, where it has got to comes from the artifact
-                harness/loop.md requires it to ship by the halfway mark; before
-                that exists, the newest thing it said. The ledger's newest line
-                is the *previous* attempt and is demoted to one line. */}
-            {live() ? (
-              <box flexDirection="column" flexShrink={0}>
-                {(live()?.outcome ?? live()?.latestActivity) ? (
-                  <box flexDirection="column" flexShrink={0}>
-                    <text height={1} flexShrink={0} fg={theme.reserve}>
-                      {live()?.outcome ? "WHERE IT HAS GOT TO" : "MOST RECENT ACTIVITY"}
-                    </text>
-                    <WrappedText
-                      body={outcome(live()?.outcome ?? live()?.latestActivity ?? "")}
-                      width={props.textWidth}
-                      fg={theme.quiet}
-                    />
-                    <text height={1} flexShrink={0}> </text>
-                  </box>
-                ) : null}
-                <text height={1} flexShrink={0} fg={theme.reserve}>
-                  {truncate(`Previously: ${ledger().problem} — ${ledger().verdict}`, props.textWidth)}
-                </text>
-              </box>
-            ) : (
-              <box flexDirection="column" flexShrink={0}>
-                <text height={1} flexShrink={0} fg={theme.reserve}>HOW IT WENT</text>
-                <WrappedText body={outcome(ledger().outcome)} width={props.textWidth} fg={theme.quiet} />
-              </box>
-            )}
-
-            <text height={1} flexShrink={0} fg={theme.sky}>Enter opens the complete work transcript</text>
-          </box>
+    <Panel title={title()} accent={verdictColor()} style={props.style ?? { width: "100%", flexGrow: 1 }}>
+      {/* The heading stays put while the body scrolls: it says which problem
+          every row below belongs to. The verdict shares its line, which is why
+          only that line is narrowed for it. */}
+      <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between">
+        <text fg={theme.paper}><strong>{headingLine()}</strong></text>
+        <text fg={live() ? theme.sage : verdictColor()}>
+          {live() ? "RUNNING" : (props.snapshot.ledger?.verdict.toUpperCase() ?? "")}
+        </text>
+      </box>
+      <For each={visible()}>
+        {(row) => (
+          <text height={1} flexShrink={0} fg={row.fg}>
+            {row.bold ? <strong>{row.text}</strong> : row.text}
+          </text>
         )}
-      </Show>
+      </For>
     </Panel>
   )
 }
@@ -355,55 +374,104 @@ function HelpPanel(props: { snapshot: ProjectSnapshot }) {
       <text fg={theme.paper}>Autopilot follows a steady path to {Math.round(finishAt())}% by reset.</text>
       <text fg={theme.quiet}>Your normal usage counts; AutoTao fills only the gap.</text>
       <text fg={theme.quiet}>Each run rechecks usage, memory, and the active-run lock.</text>
-      <text fg={theme.brass}>Enter live work · s past sessions · u change usage plan</text>
-      <text fg={theme.brass}>Space pause/resume</text>
-      <text fg={theme.quiet}>n run now · r refresh · t maintenance · ? close help</text>
+      {/* One key list to a line, short enough to survive the narrow column
+          this panel now occupies — a wrapped key list reads as two. */}
+      <text fg={theme.brass}>Enter live work · s past sessions</text>
+      <text fg={theme.brass}>u change usage plan · Space pause/resume</text>
+      <text fg={theme.brass}>↑↓ scroll the problem · PgUp/PgDn a screen</text>
+      <text fg={theme.quiet}>Home/End jump to its ends · n run now</text>
+      <text fg={theme.quiet}>r refresh · t maintenance · ? close help</text>
     </Panel>
   )
+}
+
+/**
+ * The shape of the dashboard at a given terminal size.
+ *
+ * Shared with the key handler, which has to know how many rows of the problem
+ * are on screen to scroll by a page and to stop at the end of the text.
+ */
+export function dashboardMetrics(width: number, height: number): {
+  twoColumn: boolean
+  short: boolean
+  sideWidth: number
+  sideText: number
+  mainText: number
+  bodyRows: number
+} {
+  // Two columns as soon as the right-hand column can still hold readable prose.
+  // The problem text is the reason this screen exists, so it gets the wide side
+  // and the full height of the screen; the operational panels stack down the
+  // narrow one. Anything that spans the full width — a usage plan laid out as a
+  // row, a header band, a NOW panel above the problem — costs the mathematics
+  // several rows of the only text on this screen worth reading.
+  const twoColumn = width >= 76
+  const sideWidth = Math.max(28, Math.min(46, Math.floor(width * 0.34)))
+  return {
+    twoColumn,
+    // A terminal this short cannot hold the full usage list above the NOW strip.
+    short: height < 30,
+    sideWidth,
+    sideText: Math.max(16, sideWidth - 4),
+    mainText: twoColumn ? Math.max(24, width - sideWidth - 11) : Math.max(20, width - 6),
+    // The panel spans the column, less its border and the pinned heading; the
+    // rows below it are the message row, the key hints, and the frame padding.
+    bodyRows: Math.max(3, twoColumn ? height - 9 : height - 24),
+  }
 }
 
 export function Dashboard(props: {
   snapshot: ProjectSnapshot
   message?: ActionResult | null
   width: number
+  /** Required: the layout has to know the terminal's height to fit the side
+   *  column and to size the scrolling problem panel. */
+  height: number
   autoLaunch?: boolean
   help?: boolean
+  problemOffset?: number
   updateNotice?: string | null
 }) {
   const wide = () => props.width >= 108
-  // Two columns once the right-hand column can still hold readable prose. The
-  // problem text is the reason this screen exists, so it gets the wide side and
-  // the operational panels stack down the narrow one.
-  const twoColumn = () => props.width >= 100
+  const metrics = () => dashboardMetrics(props.width, props.height)
+  const short = () => metrics().short
+  const twoColumn = () => metrics().twoColumn
   const active = () => props.autoLaunch ?? false
   const showProjectName = () => props.snapshot.project.name.trim().toLowerCase() !== "autotao"
-  const sideWidth = () => Math.max(30, Math.min(46, Math.floor(props.width * 0.34)))
-  const sideText = () => Math.max(16, sideWidth() - 4)
-  const sideBySide = () => props.width >= 76
-  const mainText = () =>
-    twoColumn() ? Math.max(24, props.width - sideWidth() - 11)
-    : sideBySide() ? Math.max(20, Math.floor(props.width * 0.62) - 7)
-    : Math.max(20, props.width - 6)
+  const sideWidth = () => metrics().sideWidth
+  const sideText = () => metrics().sideText
+  const mainText = () => metrics().mainText
 
-  const header = (
+  // In one column the name and the autopilot state share a row. Down the side
+  // column they take a line each: two spans in a box that narrow have been
+  // observed to paint over each other, and the column has the room.
+  const header = (stacked: boolean) => (
     <box
-      height={3}
+      height={stacked ? 4 : 3}
       flexShrink={0}
-      flexDirection="row"
-      alignItems="center"
-      justifyContent="space-between"
+      flexDirection={stacked ? "column" : "row"}
+      alignItems={stacked ? "flex-start" : "center"}
+      justifyContent={stacked ? "center" : "space-between"}
       backgroundColor={theme.header}
       border
       borderStyle="rounded"
       borderColor={theme.border}
       paddingX={1}
     >
-      <box flexDirection="row" gap={1}>
-        <text fg={theme.sky}><strong>◆ AUTOTAO</strong></text>
-        {showProjectName() ? <text fg={theme.paper}>{props.snapshot.project.name}</text> : null}
-      </box>
-      <box flexDirection="row" gap={1}>
-        <text fg={active() ? theme.sage : theme.brass}>● {active() ? "AUTOPILOT ON" : "AUTOPILOT PAUSED"}</text>
+      <Show when={stacked} fallback={
+        <box flexDirection="row" gap={1}>
+          <text fg={theme.sky}><strong>◆ AUTOTAO</strong></text>
+          {showProjectName() ? <text fg={theme.paper}>{props.snapshot.project.name}</text> : null}
+        </box>
+      }>
+        <text height={1} flexShrink={0} fg={theme.sky}>
+          <strong>{truncate(`◆ AUTOTAO${showProjectName() ? ` ${props.snapshot.project.name}` : ""}`, sideText())}</strong>
+        </text>
+      </Show>
+      <box flexDirection={stacked ? "column" : "row"} gap={stacked ? 0 : 1}>
+        <text height={1} flexShrink={0} fg={active() ? theme.sage : theme.brass}>
+          ● {active() ? "AUTOPILOT ON" : "AUTOPILOT PAUSED"}
+        </text>
         {wide() && !twoColumn() ? <text fg={theme.quiet}>· {props.snapshot.engine} · {props.snapshot.model}</text> : null}
       </box>
     </box>
@@ -413,32 +481,56 @@ export function Dashboard(props: {
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.canvas} padding={1} gap={1}>
       <Show when={twoColumn()} fallback={
         <>
-          {header}
+          {header(false)}
           <UsagePlan snapshot={props.snapshot} width={props.width} stacked={false} />
-          {/* Between 76 and 100 columns there is not enough height to stack
-              both panels, so they sit side by side as before. */}
-          <box minHeight={8} flexGrow={1} flexDirection={sideBySide() ? "row" : "column"} gap={1}>
+          {/* One column: NOW is a strip under the problem rather than a box
+              above it, so the mathematics keeps every row it can. */}
+          <box minHeight={8} flexGrow={1} flexDirection="column" gap={1}>
             <Show when={!props.help} fallback={<HelpPanel snapshot={props.snapshot} />}>
+              <LastAttemptPanel
+                snapshot={props.snapshot}
+                textWidth={mainText()}
+                bodyRows={metrics().bodyRows}
+                offset={props.problemOffset}
+                style={{ flexGrow: 1, minHeight: 6 }}
+              />
               <NowPanel
                 snapshot={props.snapshot}
-                textWidth={sideBySide() ? Math.max(16, Math.floor(props.width * 0.38) - 4) : mainText()}
+                textWidth={mainText()}
                 compact
-                style={sideBySide() ? { width: "38%", flexGrow: 0 } : { width: "100%", height: 5, flexShrink: 0 }}
+                dense
+                style={{ width: "100%", height: 4, flexShrink: 0 }}
               />
-              <LastAttemptPanel snapshot={props.snapshot} textWidth={mainText()} style={{ flexGrow: 1 }} />
             </Show>
           </box>
         </>
       }>
         <box flexGrow={1} flexDirection="row" gap={1}>
           <box width={sideWidth()} flexShrink={0} flexDirection="column" gap={1}>
-            {header}
-            <UsagePlan snapshot={props.snapshot} width={sideWidth()} stacked />
-            <NowPanel snapshot={props.snapshot} textWidth={sideText()} style={{ width: "100%", flexGrow: 1 }} />
+            {header(true)}
+            <UsagePlan snapshot={props.snapshot} width={sideWidth()} stacked dense={short()} />
+            {/* NOW is three lines of status. It sits at the foot of the column
+                so the space between it and the usage plan is empty canvas
+                rather than an oversized box, and so nothing here bounds the
+                height of the problem panel beside it. */}
+            <box flexGrow={1} />
+            <NowPanel
+              snapshot={props.snapshot}
+              textWidth={sideText()}
+              compact
+              dense={short()}
+              style={{ width: "100%", flexShrink: 0, height: short() ? 4 : 5 }}
+            />
           </box>
           <box flexGrow={1} flexDirection="column">
             <Show when={!props.help} fallback={<HelpPanel snapshot={props.snapshot} />}>
-              <LastAttemptPanel snapshot={props.snapshot} textWidth={mainText()} style={{ width: "100%", flexGrow: 1 }} />
+              <LastAttemptPanel
+                snapshot={props.snapshot}
+                textWidth={mainText()}
+                bodyRows={metrics().bodyRows}
+                offset={props.problemOffset}
+                style={{ width: "100%", flexGrow: 1 }}
+              />
             </Show>
           </box>
         </box>
@@ -467,7 +559,13 @@ export function Dashboard(props: {
       </box>
 
       <box height={1} flexShrink={0} flexDirection="row" justifyContent="space-between" paddingX={1}>
-        <text fg={theme.paper}>{wide() ? "Enter  Live work   s  Sessions   u  Usage plan   Space  Pause   n  Run now   ?  Help   q  Quit" : "Enter live work · s sessions · u usage · Space pause · n run now · ? help"}</text>
+        {/* Every key that does something has to be named here, in whatever
+            room the terminal leaves for saying it. */}
+        <text fg={theme.paper}>
+          {wide() ? "↑↓  Scroll   Enter  Live work   s  Sessions   u  Usage plan   Space  Pause   n  Run now   ?  Help   q  Quit"
+            : props.width >= 90 ? "↑↓ scroll · Enter live work · s sessions · u usage · Space pause · n run now · ? help"
+            : "↑↓ scroll · Enter live work · s sessions · u usage · n run now · ? help"}
+        </text>
       </box>
     </box>
   )
@@ -650,10 +748,26 @@ export function App(props: AppProps) {
   const [follow, setFollow] = createSignal(true)
   const [sessionsLoading, setSessionsLoading] = createSignal(false)
   const [update, setUpdate] = createSignal<string | null>(null)
+  const [problemOffset, setProblemOffset] = createSignal(0)
   const [draftUsage, setDraftUsage] = createSignal<UsagePolicy>({ reservePercent: 10, pace: "even" })
   let refreshInFlight: Promise<void> | null = null
   let transcriptInFlight: Promise<void> | null = null
   let lastLaunchAttemptAt = 0
+
+  // The problem panel holds more text than fits, so it scrolls. The end of the
+  // text moves as a live run writes more of it; the offset is clamped at read
+  // time rather than stored clamped, so a run that shortens its output cannot
+  // strand the view past the last row.
+  const problemBodyRows = createMemo(() => dashboardMetrics(dimensions().width, dimensions().height).bodyRows)
+  const maxProblemOffset = createMemo(() => {
+    const current = snapshot()
+    if (!current) return 0
+    const width = dashboardMetrics(dimensions().width, dimensions().height).mainText
+    return Math.max(0, problemRows(current, width).length - problemBodyRows())
+  })
+  const scrollProblem = (delta: number) => {
+    setProblemOffset((value) => Math.max(0, Math.min(maxProblemOffset(), value + delta)))
+  }
 
   const transcriptPageSize = createMemo(() => Math.max(4, dimensions().height - 10))
   const transcriptRows = createMemo(() => formatTranscriptRows(transcript()?.lines ?? [], Math.max(20, dimensions().width - 6)))
@@ -865,6 +979,12 @@ export function App(props: AppProps) {
       return
     }
 
+    if (name === "up" || name === "k") scrollProblem(-1)
+    if (name === "down" || name === "j") scrollProblem(1)
+    if (name === "pageup") scrollProblem(-problemBodyRows())
+    if (name === "pagedown") scrollProblem(problemBodyRows())
+    if (name === "home" || (name === "g" && !key.shift)) setProblemOffset(0)
+    if (name === "end" || (name === "g" && key.shift)) setProblemOffset(maxProblemOffset())
     if (name === "escape") renderer.destroy()
     if (name === "return" || name === "enter") void openNewestSession()
     if (name === "s") void browseSessions()
@@ -930,8 +1050,10 @@ export function App(props: AppProps) {
               snapshot={current()}
               message={message()}
               width={dimensions().width}
+              height={dimensions().height}
               autoLaunch={autopilot()}
               help={help()}
+              problemOffset={Math.min(problemOffset(), maxProblemOffset())}
               updateNotice={update()}
             />
           )}
