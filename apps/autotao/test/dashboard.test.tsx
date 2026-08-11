@@ -77,7 +77,7 @@ describe("dashboard layout", () => {
     [80, 24],
     [140, 40],
   ])("renders the complete campaign-free dashboard at %dx%d", async (width, height) => {
-    setup = await testRender(() => <Dashboard snapshot={snapshot} width={width} autoLaunch />, { width, height })
+    setup = await testRender(() => <Dashboard snapshot={snapshot} width={width} height={height} autoLaunch />, { width, height })
     await setup.renderOnce()
     const frame = setup.captureCharFrame()
 
@@ -93,8 +93,38 @@ describe("dashboard layout", () => {
     expect(frame).not.toContain("CAMPAIGN")
   })
 
+  test.each([
+    [80, 24],
+    [89, 31],
+    [140, 40],
+  ])("gives the problem the full height beside a stacked usage plan at %dx%d", async (width, height) => {
+    setup = await testRender(() => <Dashboard snapshot={snapshot} width={width} height={height} autoLaunch />, { width, height })
+    await setup.renderOnce()
+    const rows = setup.captureCharFrame().split("\n")
+    const rowOf = (needle: string) => rows.findIndex((row) => row.includes(needle))
+
+    // The usage figures read down the narrow column, one to a row.
+    expect(rows.some((row) => row.includes("20% used · finish at 95%"))).toBe(true)
+    // NOW sits at the foot of that column, well below the usage plan…
+    expect(rowOf("─ NOW ─")).toBeGreaterThan(rowOf("YOUR USAGE PLAN"))
+    // …and the problem panel is still open beside it, so nothing on the left
+    // caps how much mathematics the right-hand column can show.
+    expect(rows[rowOf("─ NOW ─")]).toMatch(/│\s*$/)
+    expect(rowOf("THE PROBLEM BEING WORKED ON")).toBe(rowOf("YOUR USAGE PLAN"))
+  })
+
+  test("keeps NOW below the problem in one column", async () => {
+    setup = await testRender(() => <Dashboard snapshot={snapshot} width={70} height={30} autoLaunch />, { width: 70, height: 30 })
+    await setup.renderOnce()
+    const rows = setup.captureCharFrame().split("\n")
+    const rowOf = (needle: string) => rows.findIndex((row) => row.includes(needle))
+
+    expect(rowOf("─ NOW ─")).toBeGreaterThan(rowOf("THE PROBLEM BEING WORKED ON"))
+    expect(rows.some((row) => row.includes("1h 2m elapsed · last output 8s ago"))).toBe(true)
+  })
+
   test("explains the policy and every persistent control in product language", async () => {
-    setup = await testRender(() => <Dashboard snapshot={snapshot} width={80} autoLaunch help />, { width: 80, height: 24 })
+    setup = await testRender(() => <Dashboard snapshot={snapshot} width={80} height={24} autoLaunch help />, { width: 80, height: 24 })
     await setup.renderOnce()
     const frame = setup.captureCharFrame()
 
@@ -108,6 +138,7 @@ describe("dashboard layout", () => {
       <Dashboard
         snapshot={snapshot}
         width={80}
+        height={24}
         autoLaunch
         message={{ ok: true, summary: "Maintenance finished", output: "" }}
       />
@@ -126,7 +157,7 @@ describe("dashboard layout", () => {
       ...snapshot,
       ledger: { ...snapshot.ledger!, target: longTarget, outcome: "Hostile verification remains in progress." },
     }
-    setup = await testRender(() => <Dashboard snapshot={completeSnapshot} width={80} autoLaunch />, { width: 80, height: 24 })
+    setup = await testRender(() => <Dashboard snapshot={completeSnapshot} width={80} height={24} autoLaunch />, { width: 80, height: 24 })
     await setup.renderOnce()
     const frame = setup.captureCharFrame()
 
@@ -140,7 +171,7 @@ describe("dashboard layout", () => {
       ...snapshot,
       project: { ...snapshot.project, name: "autotao", adapter: "autotao" },
     }
-    setup = await testRender(() => <Dashboard snapshot={nativeSnapshot} width={80} autoLaunch />, { width: 80, height: 24 })
+    setup = await testRender(() => <Dashboard snapshot={nativeSnapshot} width={80} height={24} autoLaunch />, { width: 80, height: 24 })
     await setup.renderOnce()
     const frame = setup.captureCharFrame()
 

@@ -70,14 +70,17 @@ function usageSentence(snapshot: ProjectSnapshot, nextRunFits: boolean): { text:
   return { text: "On pace — waiting before the next run", color: theme.sage }
 }
 
-function UsagePlan(props: { snapshot: ProjectSnapshot; width: number; stacked?: boolean }) {
+function UsagePlan(props: { snapshot: ProjectSnapshot; width: number; stacked?: boolean; dense?: boolean }) {
   const plan = createMemo(() => usageRunway(props.snapshot.gate, new Date(props.snapshot.sampledAt).getTime()))
   const primary = () => plan().primary
   const status = () => usageSentence(props.snapshot, plan().nextRunFits)
   const barWidth = () => Math.max(16, Math.min(76, props.width - (props.stacked ? 6 : 10)))
-  // Stacked in a narrow column: the four figures read as a list rather than a
-  // row that would have to be squeezed or truncated.
-  const height = () => props.stacked ? 11 : props.width >= 108 ? 6 : 5
+  // Stacked in a narrow column: the figures read as a list rather than a row
+  // that would have to be squeezed or truncated. On a short terminal the list
+  // drops to the figures alone — the panel keeps a fixed height either way,
+  // because a shrunk panel paints its last rows over each other rather than
+  // clipping them.
+  const height = () => props.stacked ? (props.dense ? 8 : 10) : props.width >= 108 ? 6 : 5
   return (
     <Panel title="YOUR USAGE PLAN" accent={theme.sky} style={{ height: height(), flexShrink: 0 }}>
       <Show when={primary()} fallback={
@@ -97,7 +100,9 @@ function UsagePlan(props: { snapshot: ProjectSnapshot; width: number; stacked?: 
               <text height={wrapParagraph(status().text, barWidth()).length} flexShrink={0} fg={status().color}>
                 <strong>{wrapParagraph(status().text, barWidth()).join("\n")}</strong>
               </text>
-              <text height={1} flexShrink={0} fg={theme.quiet}>{runway().tank.label}</text>
+              {!props.dense ? (
+                <text height={1} flexShrink={0} fg={theme.quiet}>{runway().tank.label}</text>
+              ) : null}
             </Show>
             <RunwayBar
               used={runway().tank.used ?? 0}
@@ -113,11 +118,14 @@ function UsagePlan(props: { snapshot: ProjectSnapshot; width: number; stacked?: 
                 <text fg={theme.reserve}>{Math.max(0, 100 - Math.round(runway().tank.finishAt))}% protected</text>
               </box>
             }>
-              <text height={1} flexShrink={0} fg={theme.sage}>{`${Math.round(runway().tank.used ?? 0)}% used`}</text>
+              {/* Each row is one string in one child. Two spans in a column
+                  this narrow have been observed to paint over each other. */}
+              <text height={1} flexShrink={0} fg={theme.sage}>{`${Math.round(runway().tank.used ?? 0)}% used · finish at ${Math.round(runway().tank.finishAt)}%`}</text>
               <text height={1} flexShrink={0} fg={theme.sky}>{runway().paced ? `${Math.round(runway().paceAt)}% pace right now` : "use spare capacity now"}</text>
-              <text height={1} flexShrink={0} fg={theme.paper}>{`finish at ${Math.round(runway().tank.finishAt)}%`}</text>
-              <text height={1} flexShrink={0} fg={theme.reserve}>{`${Math.max(0, 100 - Math.round(runway().tank.finishAt))}% protected`}</text>
-              <text height={1} flexShrink={0} fg={theme.quiet}>{resetLabel(runway().tank, new Date(props.snapshot.sampledAt).getTime())}</text>
+              <text height={1} flexShrink={0} fg={theme.reserve}>{`${Math.max(0, 100 - Math.round(runway().tank.finishAt))}% protected for you`}</text>
+              {!props.dense ? (
+                <text height={1} flexShrink={0} fg={theme.quiet}>{resetLabel(runway().tank, new Date(props.snapshot.sampledAt).getTime())}</text>
+              ) : null}
             </Show>
             {!props.stacked && props.width >= 108 ? (
               <box flexDirection="row" justifyContent="space-between">
@@ -132,9 +140,22 @@ function UsagePlan(props: { snapshot: ProjectSnapshot; width: number; stacked?: 
   )
 }
 
-function NowPanel(props: { snapshot: ProjectSnapshot; textWidth: number; compact?: boolean; style?: Record<string, unknown> }) {
+function NowPanel(props: { snapshot: ProjectSnapshot; textWidth: number; compact?: boolean; dense?: boolean; style?: Record<string, unknown> }) {
   const running = () => props.snapshot.run.phase === "running"
   const latestEvent = () => props.snapshot.pipeline.at(-1)?.message
+  // One row for both timings, in the longest wording that fits the column —
+  // cutting the sentence short would leave "last outp…", which says nothing.
+  const timings = () => {
+    const elapsed = duration(props.snapshot.run.elapsedSeconds)
+    const last = duration(props.snapshot.run.lastWriteSeconds)
+    const wordings = [
+      `${elapsed} elapsed · last output ${last} ago`,
+      `${elapsed} · last output ${last} ago`,
+      `${elapsed} · output ${last} ago`,
+      `${elapsed} · ${last}`,
+    ]
+    return wordings.find((wording) => wording.length <= props.textWidth) ?? wordings[wordings.length - 1]!
+  }
   return (
     <Panel title="NOW" accent={running() ? theme.sage : theme.border} style={props.style ?? { width: "100%", flexShrink: 0 }}>
       {/* Every line below is a single string child on purpose. Splitting one
@@ -147,8 +168,16 @@ function NowPanel(props: { snapshot: ProjectSnapshot; textWidth: number; compact
       <Show when={running()} fallback={
         <text height={1} flexShrink={0} fg={theme.quiet}>AutoTao checks again automatically.</text>
       }>
-        <text height={1} flexShrink={0} fg={theme.quiet}>{`${duration(props.snapshot.run.elapsedSeconds)} elapsed`}</text>
-        <text height={1} flexShrink={0} fg={theme.quiet}>{`last output ${duration(props.snapshot.run.lastWriteSeconds)} ago`}</text>
+        {/* On a short terminal the two timings share a row, so the panel keeps
+            to two lines and the column beside it still ends where it should. */}
+        <Show when={props.dense} fallback={
+          <>
+            <text height={1} flexShrink={0} fg={theme.quiet}>{`${duration(props.snapshot.run.elapsedSeconds)} elapsed`}</text>
+            <text height={1} flexShrink={0} fg={theme.quiet}>{`last output ${duration(props.snapshot.run.lastWriteSeconds)} ago`}</text>
+          </>
+        }>
+          <text height={1} flexShrink={0} fg={theme.quiet}>{truncate(timings(), props.textWidth)}</text>
+        </Show>
       </Show>
       {/* Stacked under the problem panel, this is a status strip and must not
           take room the mathematics needs. */}
@@ -366,23 +395,27 @@ export function Dashboard(props: {
   snapshot: ProjectSnapshot
   message?: ActionResult | null
   width: number
+  height?: number
   autoLaunch?: boolean
   help?: boolean
   updateNotice?: string | null
 }) {
   const wide = () => props.width >= 108
-  // Two columns once the right-hand column can still hold readable prose. The
-  // problem text is the reason this screen exists, so it gets the wide side and
-  // the operational panels stack down the narrow one.
-  const twoColumn = () => props.width >= 100
+  // A terminal this short cannot hold the full usage list above the NOW strip.
+  const short = () => (props.height ?? 40) < 30
+  // Two columns as soon as the right-hand column can still hold readable prose.
+  // The problem text is the reason this screen exists, so it gets the wide side
+  // and the full height of the screen; the operational panels stack down the
+  // narrow one. Anything that spans the full width — a usage plan laid out as a
+  // row, a NOW panel above the problem — costs the mathematics several rows of
+  // the only text on this screen worth reading.
+  const twoColumn = () => props.width >= 76
   const active = () => props.autoLaunch ?? false
   const showProjectName = () => props.snapshot.project.name.trim().toLowerCase() !== "autotao"
-  const sideWidth = () => Math.max(30, Math.min(46, Math.floor(props.width * 0.34)))
+  const sideWidth = () => Math.max(28, Math.min(46, Math.floor(props.width * 0.34)))
   const sideText = () => Math.max(16, sideWidth() - 4)
-  const sideBySide = () => props.width >= 76
   const mainText = () =>
     twoColumn() ? Math.max(24, props.width - sideWidth() - 11)
-    : sideBySide() ? Math.max(20, Math.floor(props.width * 0.62) - 7)
     : Math.max(20, props.width - 6)
 
   const header = (
@@ -411,30 +444,41 @@ export function Dashboard(props: {
 
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.canvas} padding={1} gap={1}>
+      {header}
       <Show when={twoColumn()} fallback={
         <>
-          {header}
           <UsagePlan snapshot={props.snapshot} width={props.width} stacked={false} />
-          {/* Between 76 and 100 columns there is not enough height to stack
-              both panels, so they sit side by side as before. */}
-          <box minHeight={8} flexGrow={1} flexDirection={sideBySide() ? "row" : "column"} gap={1}>
+          {/* One column: NOW is a strip under the problem rather than a box
+              above it, so the mathematics keeps every row it can. */}
+          <box minHeight={8} flexGrow={1} flexDirection="column" gap={1}>
             <Show when={!props.help} fallback={<HelpPanel snapshot={props.snapshot} />}>
+              <LastAttemptPanel snapshot={props.snapshot} textWidth={mainText()} style={{ flexGrow: 1, minHeight: 6 }} />
               <NowPanel
                 snapshot={props.snapshot}
-                textWidth={sideBySide() ? Math.max(16, Math.floor(props.width * 0.38) - 4) : mainText()}
+                textWidth={mainText()}
                 compact
-                style={sideBySide() ? { width: "38%", flexGrow: 0 } : { width: "100%", height: 5, flexShrink: 0 }}
+                dense
+                style={{ width: "100%", height: 4, flexShrink: 0 }}
               />
-              <LastAttemptPanel snapshot={props.snapshot} textWidth={mainText()} style={{ flexGrow: 1 }} />
             </Show>
           </box>
         </>
       }>
         <box flexGrow={1} flexDirection="row" gap={1}>
           <box width={sideWidth()} flexShrink={0} flexDirection="column" gap={1}>
-            {header}
-            <UsagePlan snapshot={props.snapshot} width={sideWidth()} stacked />
-            <NowPanel snapshot={props.snapshot} textWidth={sideText()} style={{ width: "100%", flexGrow: 1 }} />
+            <UsagePlan snapshot={props.snapshot} width={sideWidth()} stacked dense={short()} />
+            {/* NOW is three lines of status. It sits at the foot of the column
+                so the space between it and the usage plan is empty canvas
+                rather than an oversized box, and so nothing here bounds the
+                height of the problem panel beside it. */}
+            <box flexGrow={1} />
+            <NowPanel
+              snapshot={props.snapshot}
+              textWidth={sideText()}
+              compact
+              dense={short()}
+              style={{ width: "100%", flexShrink: 0, height: short() ? 4 : 5 }}
+            />
           </box>
           <box flexGrow={1} flexDirection="column">
             <Show when={!props.help} fallback={<HelpPanel snapshot={props.snapshot} />}>
@@ -930,6 +974,7 @@ export function App(props: AppProps) {
               snapshot={current()}
               message={message()}
               width={dimensions().width}
+              height={dimensions().height}
               autoLaunch={autopilot()}
               help={help()}
               updateNotice={update()}
