@@ -7,7 +7,6 @@ steering wheel** — the `priority:` list below overrides index rotation entirel
 iteration: 0
 last_problem: none
 sourcing_counter: 0
-run_model: claude-fable-5
 ```
 
 - **iteration** — incremented by each loop iteration.
@@ -15,8 +14,19 @@ run_model: claude-fable-5
 - **sourcing_counter** — at ≥ 4, the next iteration is a SOURCING iteration
   (`harness/formalize.md` on a new candidate) and the counter resets. This is what keeps
   new problems entering the portfolio.
-- **run_model** — full model id, not an alias; aliases do not resolve. A `RUN_MODEL` env
-  var overrides it. The launch gate checks the tank this exact model will draw from.
+This file no longer carries `run_model:`. What the solving agents run as — engine, model
+and reasoning effort — is configured in **one place, `autotao.json`**:
+
+```json
+"engine": "claude", "model": "claude-fable-5", "effort": "xhigh"
+```
+
+The app exports those as `RUN_ENGINE` / `RUN_MODEL` / `RUN_EFFORT` into every command it
+spawns, and `run-model.sh` / `run-once.sh` already prefer the environment over their own
+fallbacks. Splitting them across this file and a hardcoded script default meant the model
+an operator selected was not reliably the model that ran. A stale `run_model:` line here
+is now ignored by the app-launched loop; delete it. (`RUN_MODEL=... bash scripts/...`
+still works for a one-off manual override.)
 
 ## priority
 

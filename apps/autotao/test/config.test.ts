@@ -41,7 +41,42 @@ describe("project configuration", () => {
       launchIntervalMs: 600_000,
       tickIntervalMs: 0,
     })
-    expect(loaded.config.usage).toEqual({ reservePercent: 5, pace: "even" })
+    expect(loaded.config.usage).toEqual({ reservePercent: 10, pace: "even" })
+  })
+
+  test("defaults the solving agents to fable at xhigh", async () => {
+    const loaded = await project({
+      schemaVersion: 1,
+      project: { name: "example", adapter: "autotao" },
+    })
+
+    expect(loaded.config.model).toBe("claude-fable-5")
+    expect(loaded.config.effort).toBe("xhigh")
+  })
+
+  test("takes model and effort from autotao.json", async () => {
+    const loaded = await project({
+      schemaVersion: 1,
+      project: { name: "example", adapter: "autotao" },
+      model: "claude-opus-5",
+      effort: "max",
+    })
+
+    expect(loaded.config.model).toBe("claude-opus-5")
+    expect(loaded.config.effort).toBe("max")
+  })
+
+  // A blank model must not load: it would be exported as RUN_MODEL="", which
+  // ${RUN_MODEL:-...} cannot distinguish from unset, so the run would quietly fall
+  // through to a different model than the operator configured.
+  test("rejects a blank model and an unknown effort", async () => {
+    await expect(
+      project({ schemaVersion: 1, project: { name: "e", adapter: "autotao" }, model: "   " }),
+    ).rejects.toThrow(/model must be a non-empty string/)
+
+    await expect(
+      project({ schemaVersion: 1, project: { name: "e", adapter: "autotao" }, effort: "ultra" }),
+    ).rejects.toThrow(/effort must be one of/)
   })
 
   test("retains the migration alias and explicit autonomous policy", async () => {
@@ -50,14 +85,14 @@ describe("project configuration", () => {
       engine: "codex",
       project: { name: "new-math", adapter: "legacy-new-math" },
       automation: { autoLaunch: true, launchIntervalMs: 120_000, tickIntervalMs: 900_000 },
-      usage: { reservePercent: 0, pace: "even" },
+      usage: { reservePercent: 10, pace: "even" },
     })
 
     expect(loaded.config.project.adapter).toBe("legacy-new-math")
     expect(loaded.config.engine).toBe("codex")
     expect(loaded.config.automation.autoLaunch).toBe(true)
     expect(loaded.config.automation.tickIntervalMs).toBe(900_000)
-    expect(loaded.config.usage.reservePercent).toBe(0)
+    expect(loaded.config.usage.reservePercent).toBe(10)
   })
 
   test("prefers an ignored private workspace over the distributable template", async () => {

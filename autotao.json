@@ -2,6 +2,8 @@
   "$schema": "./apps/autotao/autotao.schema.json",
   "schemaVersion": 1,
   "engine": "claude",
+  "model": "claude-fable-5",
+  "effort": "xhigh",
   "project": {
     "name": "autotao",
     "adapter": "autotao"
