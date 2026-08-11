@@ -5,9 +5,19 @@ nohup.out
 .claude/settings.local.json
 attempts/.run.lock
 
-# AutoTao's imported and last-known runtime state is machine-local. The portable
-# project contract is autotao.json; state snapshots must never enter git.
+# AutoTao's imported and last-known runtime state is machine-local. State snapshots
+# must never enter git.
 .autotao/
+
+# The operator's live config. Tracked as autotao.example.json instead: this file is
+# not a static contract, it is runtime state the app rewrites. Pressing `u` in the
+# TUI writes the usage policy straight back here (RepositoryController.updateUsagePolicy,
+# via the .tmp- rename below), so tracking it meant every operator keystroke dirtied
+# the working tree — and one such write, reservePercent 5 -> 10, was committed as
+# 933b205 "Leave a ten percent usage reserve" before this split existed. It also
+# carries per-machine choices (engine, model, effort, autoLaunch) that no clone should
+# inherit; a fresh checkout should not arrive with autopilot already switched on.
+/autotao.json
 
 # Raw agent logs: large, and they contain whatever the run happened to print.
 # Keep them locally (the triage tier reads them); never publish them.

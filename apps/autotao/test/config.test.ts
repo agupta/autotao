@@ -44,6 +44,23 @@ describe("project configuration", () => {
     expect(loaded.config.usage).toEqual({ reservePercent: 10, pace: "even" })
   })
 
+  // autotao.json is untracked, so "fresh clone, no config" is the first thing a new
+  // user hits. The message has to name the fix, not just the absence.
+  test("points a fresh checkout at the tracked example", async () => {
+    const root = await mkdtemp(join(tmpdir(), "autotao-fresh-"))
+    roots.push(root)
+    await writeFile(join(root, "autotao.example.json"), "{}\n")
+    process.env.AUTOTAO_HOME = root
+
+    const error = await loadConfig(root).then(
+      () => null,
+      (e: unknown) => (e instanceof Error ? e.message : String(e)),
+    )
+
+    expect(error).toContain("not tracked in git")
+    expect(error).toContain("cp autotao.example.json autotao.json")
+  })
+
   test("defaults the solving agents to fable at xhigh", async () => {
     const loaded = await project({
       schemaVersion: 1,

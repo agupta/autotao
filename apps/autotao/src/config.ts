@@ -163,7 +163,17 @@ export async function findConfig(start = process.cwd()): Promise<string> {
     if (cursor === filesystemRoot) break
     cursor = dirname(cursor)
   }
-  throw new Error(`No autotao.json found from ${resolve(start)} upward`)
+  // autotao.json is deliberately untracked (see .gitignore), so a fresh clone has
+  // none and this is the first thing a new user hits. Say how to fix it rather than
+  // only what is missing.
+  const example = join(resolve(start), "autotao.example.json")
+  const hint = (await exists(example))
+    ? `\n  cp autotao.example.json autotao.json    # then edit engine / model / effort`
+    : ""
+  throw new Error(
+    `No autotao.json found from ${resolve(start)} upward.` +
+      ` It is machine-local and not tracked in git; copy the example to create one:${hint}`,
+  )
 }
 
 function command(value: unknown, fallback: readonly string[], key: string): string[] {

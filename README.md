@@ -265,7 +265,23 @@ Use `autotao --global` or `autotao --local` to choose explicitly;
 `AUTOTAO_SCOPE=global|local` provides the same control for scripts. Headless commands default
 to global state when both exist.
 
-The checked-in `autotao.json` enables continuous supervision. By default AutoTao protects
+`autotao.json` is machine-local and not tracked in git — copy it from the tracked
+`autotao.example.json` once per checkout:
+
+```bash
+cp autotao.example.json autotao.json
+```
+
+It is untracked for two reasons: the TUI writes the usage policy back into it whenever
+you press `u`, so tracking it made ordinary operator actions dirty the working tree; and
+it carries per-machine choices — `engine`, `model`, `effort`, `automation.autoLaunch` —
+that no clone should silently inherit. Cloning the repository therefore does not start
+supervising anything until you create the file and enable it.
+
+The example ships with `automation.autoLaunch: false`, matching the application's own
+default — copying it gives you a console that observes but spends nothing until you turn
+autopilot on, with `Space` in the TUI or by setting the flag. Once enabled, AutoTao
+supervises continuously. By default it protects
 5% of each allowance and follows a steady path toward using the other 95% by reset. Your
 normal usage counts first; AutoTao fills only the gap with checked math runs. This avoids
 both leaving a large allowance unused and burning the whole week on day one.

@@ -17,6 +17,21 @@ fi
 git clone --local --no-hardlinks "$REPO" "$WORKSPACE"
 git -C "$WORKSPACE" remote remove origin
 
+# The clone carries only tracked files, and autotao.json is deliberately untracked
+# (it is per-machine and the TUI rewrites it). Without seeding one here the new
+# workspace would have no config at all and the app would refuse to start, so copy
+# the tracked example across. Never overwrite: the clone should not clobber a config
+# a caller placed at $WORKSPACE ahead of time.
+if [[ ! -e "$WORKSPACE/autotao.json" ]]; then
+  if [[ -f "$WORKSPACE/autotao.example.json" ]]; then
+    cp "$WORKSPACE/autotao.example.json" "$WORKSPACE/autotao.json"
+  elif [[ -f "$REPO/autotao.example.json" ]]; then
+    cp "$REPO/autotao.example.json" "$WORKSPACE/autotao.json"
+  else
+    printf 'warning: no autotao.example.json to seed %s/autotao.json from\n' "$WORKSPACE" >&2
+  fi
+fi
+
 CONFIG_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}"
 CONFIG_DIR="$CONFIG_ROOT/autotao"
 if [[ ! -d "$CONFIG_DIR" ]]; then

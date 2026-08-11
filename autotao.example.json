@@ -10,7 +10,7 @@
   },
   "refreshMs": 5000,
   "automation": {
-    "autoLaunch": true,
+    "autoLaunch": false,
     "launchIntervalMs": 600000,
     "tickIntervalMs": 900000
   },
