@@ -31,9 +31,11 @@ The high-value filter is the **`informal_status`** field. Three buckets matter:
 | `decidable` | open, finite decision procedure exists | same, plus a clear termination story |
 | `verifiable` | open, but a finite **example** settles it affirmatively | the rarest and best: success is a single exhibited object |
 
-These map directly onto feature 2 (verification asymmetry) and feature 5 (under-searched
-direction) of the rubric. Filtering by prize value ≤ $500 is a decent proxy for "hard but
-not hopeless" — the big-prize problems are strip-mined.
+These can score well on feature 2 (verification tractability) and feature 5
+(under-searched direction), but they are not automatically good autonomous targets.
+In `proof-first` mode, keep a computation-shaped candidate in the backlog unless its
+finite artifact tests or supports a genuinely new structural idea. Filtering by prize
+value ≤ $500 is only a rough proxy for "hard but not hopeless".
 
 **Triage before formalizing.** The dominant auto-reject in these buckets is *"true for
 all sufficiently large n, finite check remaining but astronomically large"* — that is
@@ -56,8 +58,8 @@ publication ladder someone is actively extending one parameter at a time.
 
 The signal you're looking for in a ladder paper: the abstract says "we prove X for
 parameter ≤ k", the conclusion says the method breaks at k+1 for a *specific, stated*
-reason, and the venue has published the previous three rungs. That is a problem where the
-next rung is a paper and the failure reason is a search target.
+reason, and the next theorem has conceptual value beyond increasing k. Before admission,
+inspect current linked claims and compare their exact scope to the proposed target.
 
 ## 3. Recent arXiv "almost proved X" papers
 

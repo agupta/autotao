@@ -28,6 +28,8 @@ MODE="${1:-launch}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$DIR/.." && pwd)"
 CACHE="$HOME/.claude/rate_limits_v2.json"
+LEGACY_CACHE="$HOME/.claude/rate_limits.json"
+RETRY_AT_FILE="$HOME/.claude/rate_limits_retry_at"
 
 ENGINE="$(bash "$DIR/run-engine.sh")"
 if [[ "$ENGINE" == codex ]]; then
@@ -64,12 +66,20 @@ esac
 # place rather than assumed.
 read -r _ MODEL_KEY < <(bash "$DIR/run-model.sh")
 
-# Self-refresh if the cache is missing or older than CACHE_MAX_AGE (default 10 min).
-# The watchdog passes CACHE_MAX_AGE=55 to force a fresh read every tick.
+# Refresh only when both local cache sources are stale. Interactive Claude sessions can
+# update the aggregate legacy cache without another HTTP request; the headless endpoint
+# cache adds per-model detail. A persisted Retry-After prevents redraws from sustaining a
+# rate limit.
 NOW=$(date +%s)
 CTS=$(jq -r '.ts // 0' "$CACHE" 2>/dev/null || echo 0)
-if [[ ! -f "$CACHE" || $(( NOW - ${CTS%.*} )) -gt "${CACHE_MAX_AGE:-600}" ]]; then
+LTS=$(jq -r '.ts // 0' "$LEGACY_CACHE" 2>/dev/null || echo 0)
+FRESHEST_TS=${CTS%.*}
+(( ${LTS%.*} > FRESHEST_TS )) && FRESHEST_TS=${LTS%.*}
+RETRY_AT=$(cat "$RETRY_AT_FILE" 2>/dev/null || echo 0)
+if (( NOW - FRESHEST_TS > ${CACHE_MAX_AGE:-600} && NOW >= ${RETRY_AT:-0} )); then
   bash "$REPO/scripts/fetch-limits.sh" >/dev/null 2>&1 || true
+  CTS=$(jq -r '.ts // 0' "$CACHE" 2>/dev/null || echo 0)
+  LTS=$(jq -r '.ts // 0' "$LEGACY_CACHE" 2>/dev/null || echo 0)
 fi
 
 emit(){ # emit <rc> <reason>
@@ -90,6 +100,8 @@ USAGE_SESSION_RESET_AT=${SESSION_RESET:-0}
 USAGE_WEEK_RESET_AT=${WEEK_RESET:-0}
 USAGE_SEV=${SEV:-unknown}
 USAGE_AGE=${AGE:--1}
+USAGE_SOURCE=${SOURCE:-unknown}
+USAGE_RETRY_AT=${RETRY_AT:-0}
 USAGE_RC=$1
 USAGE_REASON="$2"
 EOF
@@ -101,21 +113,38 @@ fail(){ # fail <rc> <reason>
   exit "$1"
 }
 
-[[ -f "$CACHE" ]] || fail 3 "no usage cache and endpoint refresh failed"
+[[ -f "$CACHE" || -f "$LEGACY_CACHE" ]] || fail 3 "no usage cache and endpoint refresh failed"
 
-read -r SESSION WEEK MODELW SEV TS SESSION_RESET WEEK_RESET < <(
-  jq -r --arg m "$MODEL_KEY" \
-    '[(.session // -1), (.weekly_all // -1),
-      (if (.weekly_by_model // {} | has($m)) then (.weekly_by_model[$m] | tostring) else "n/a" end),
-      (.severity // "normal"), (.ts // 0),
-      (.session_resets_at // 0), (.weekly_resets_at // 0)] | @tsv' "$CACHE"
-)
+if (( ${LTS%.*} > ${CTS%.*} )); then
+  read -r SESSION WEEK TS SESSION_RESET WEEK_RESET < <(
+    jq -r '[(.five_hour.used_percentage // -1), (.seven_day.used_percentage // -1),
+      (.ts // 0), (.five_hour.resets_at // 0), (.seven_day.resets_at // 0)] | @tsv' "$LEGACY_CACHE"
+  )
+  MODELW=n/a
+  SEV=normal
+  SOURCE=statusline
+else
+  read -r SESSION WEEK MODELW SEV TS SESSION_RESET WEEK_RESET < <(
+    jq -r --arg m "$MODEL_KEY" \
+      '[(.session // -1), (.weekly_all // -1),
+        (if (.weekly_by_model // {} | has($m)) then (.weekly_by_model[$m] | tostring) else "n/a" end),
+        (.severity // "normal"), (.ts // 0),
+        (.session_resets_at // 0), (.weekly_resets_at // 0)] | @tsv' "$CACHE"
+  )
+  SOURCE=endpoint
+fi
 AGE=$(( NOW - ${TS%.*} ))
 SESSION=${SESSION%.*}; WEEK=${WEEK%.*}
 [[ "$MODELW" == "n/a" ]] || MODELW=${MODELW%.*}
 
 [[ "$SESSION" -ge 0 && "$WEEK" -ge 0 ]] || fail 3 "cache has no usage data (session=$SESSION weekly=$WEEK)"
-[[ "$AGE" -le 3600 ]] || fail 3 "cache older than 1h — treating as unknown"
+if [[ "$AGE" -gt 3600 ]]; then
+  RETRY_AT=$(cat "$RETRY_AT_FILE" 2>/dev/null || echo 0)
+  if (( RETRY_AT > NOW )); then
+    fail 3 "refresh rate-limited; retry in $(( RETRY_AT - NOW ))s (last snapshot ${AGE}s old)"
+  fi
+  fail 3 "cache older than 1h — treating as unknown"
+fi
 
 [[ "$MODELW" == "n/a" ]] && MW_DISP="n/a" || MW_DISP="${MODELW}%"
 printf 'session=%s%% weekly_all=%s%% weekly[%s]=%s (+burn s=%s w=%s vs %s ceilings s=%s w=%s) sev=%s age=%ss\n' \

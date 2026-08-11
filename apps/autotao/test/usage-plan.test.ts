@@ -49,6 +49,10 @@ describe("usage runway", () => {
     expect(usageRunway(gate(tank(80), "eager"), start).nextRunFits).toBe(true)
   })
 
+  test("matches the shell gate by refusing a run that lands exactly on the ceiling", () => {
+    expect(usageRunway(gate(tank(85), "eager"), start).nextRunFits).toBe(false)
+  })
+
   test("falls back to the finish line when reset metadata is unavailable", () => {
     const withoutReset = { ...tank(80), resetAt: null, windowMinutes: null }
     expect(paceAt(withoutReset, "even", start)).toBe(95)

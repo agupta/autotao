@@ -59,12 +59,12 @@ One iteration of the loop, unattended:
 
 1. **Orient** — read the attempt ledger, reconcile any orphaned runs from prior
    iterations, pick up the loop state.
-2. **Choose a job** — either an ATTEMPT iteration against a problem's ACTIVE TARGET
+2. **Choose a job** — either an ATTEMPT iteration against a problem's selected target
    (from an operator-controlled priority queue, or index rotation), or, every 5th
    iteration, a SOURCING iteration that formalizes a brand-new problem into the
-   portfolio. Every 5th attempt goes at the full conjecture instead of the named
-   partial.
-3. **Re-verify the problem is still open** before spending a run on it.
+   portfolio. Attempt tiers follow a ten-run `P, P, B, P, F, B, P, B, P, F` cycle:
+   five publishable rungs, three decisive bottlenecks, and two full-conjecture runs.
+3. **Re-verify status and credit availability** before spending a run on it.
 4. **Attempt it** — compose the problem file with a track harness and execute with
    subagent rounds, adversarial self-audit, and an independently-written checker.
 5. **Ship before the wall** — the run is time-capped and gets no closing turn, so the
@@ -77,11 +77,10 @@ memory gates before every launch, an orphan reaper, and a campaign-free OpenTUI 
 
 ## The design decisions that matter
 
-1. **Absolutist prompts pointed one notch below the conjecture.** The prompt refuses
+1. **Absolutist prompts on a three-tier difficulty ladder.** The prompt refuses
    partial credit — "partial progress does not count unless it implies exactly the
-   ACTIVE TARGET" — which is what prevents give-up behavior. But it's aimed at *named
-   partials* that would have been a standalone paper two years ago, not at the famous
-   conjecture. ~80% of runs target named partials; ~20% go straight at the conjecture.
+   selected target" — which prevents give-up behavior. Half of runs target a scoped
+   publishable rung, 30% a natural decisive bottleneck, and 20% the full conjecture.
    (The absolutism is adapted from OpenAI's published Cycle Double Cover prompt.)
 2. **Verification is where the human effort goes, and it is non-negotiable.** A claim
    without a passing artifact is logged `failed`, not `pending`. Certificates use exact
@@ -135,8 +134,13 @@ re-ship in place. Cheap compute lets you tolerate losing a run; this doesn't.
 
 **Selectivity substitutes for volume.** When you get a few runs a day rather than
 thousands, choosing the target is most of the work. That is what `criteria.md`'s 8/12
-threshold, the named-target discipline, and the mandatory open-status check are for — a
+threshold, the target ladder, and mandatory status plus credit/preemption checks are for — a
 run spent rediscovering a 2010 result is a meaningful fraction of the week's budget.
+
+**Heavy computation is disposable, not the root process.** Searches and full verifiers
+with uncertain memory or runtime go through `scripts/safe-compute.sh`, after a checkpoint.
+A timeout or resource kill becomes a logged failed experiment instead of taking the
+research iteration and its finished work down with it.
 
 **And the failures are worth recording precisely because runs are scarce.** `attempts/LOG.md`
 is append-only. At this budget a repeated dead end is expensive, so the ledger earns its
@@ -165,7 +169,8 @@ verify/
 attempts/
   LOG.md             — one line per run, success or failure, never deleted
 scripts/             — runner, launch gate, budget/memory guards, orphan reaper, console
-LOOP_STATE.md        — iteration counter, priority queue, run model, push authorization
+pyproject.toml        — verification dependencies (`uv.lock` pins them reproducibly)
+LOOP_STATE.md        — iteration/attempt counters, target schedule, steering, run model
 ```
 
 ## Install
@@ -220,12 +225,15 @@ just share a session with their launcher. `scripts/preflight.sh` reports all of 
 
 ## Quickstart
 
-Requires an agent CLI (Claude Code and/or Codex) already authenticated, plus a Python
-environment for the verification scripts:
+Requires an authenticated agent CLI (Claude Code and/or Codex). The verification
+environment is pinned with `uv`:
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install sympy networkx python-sat
+uv sync
 ```
+
+Without `uv`, `python3 -m venv .venv` plus installation of the dependencies in
+`pyproject.toml` is supported, but not reproducibly locked.
 
 ```bash
 # 1. Create an ignored private workspace for actual research state.
@@ -266,19 +274,20 @@ Use `autotao --global` or `autotao --local` to choose explicitly;
 to global state when both exist.
 
 The checked-in `autotao.json` enables continuous supervision. By default AutoTao protects
-5% of each allowance and follows a steady path toward using the other 95% by reset. Your
+10% of each allowance and follows a steady path toward using the other 90% by reset. Your
 normal usage counts first; AutoTao fills only the gap with checked math runs. This avoids
 both leaving a large allowance unused and burning the whole week on day one.
 
 ```json
 "usage": {
-  "reservePercent": 5,
+  "reservePercent": 10,
   "pace": "even"
 }
 ```
 
-Set `pace` to `eager` to use available headroom immediately. Every run still passes the
-existing usage, memory, and one-run-at-a-time gates. Press `Enter` to follow the current
+Press `u` in the dashboard to change the protected percentage or toggle even/eager pacing;
+the TUI writes this policy atomically to the selected workspace's `autotao.json`. Every run
+still passes the existing usage, memory, and one-run-at-a-time gates. Press `Enter` to follow the current
 run's readable work transcript, or `s` to browse current and past sessions. Transcript
 views support arrows, Page Up/Down, Home/End, and live-follow mode. Press `Space` to
 pause/resume autopilot, `n` to ask for one checked run now, `?` for an explanation, and
@@ -296,7 +305,12 @@ Imported and last-known runtime state lives in the private workspace's ignored
 [`apps/autotao/README.md`](apps/autotao/README.md) for development, the versioned JSON
 protocol, and standalone builds.
 
-Set user intent only in **`autotao.json`** (`usage.reservePercent` and `usage.pace`). Keep
+Existing `new-math` research repositories can remain intact as local workspaces while the
+AutoTao binary replaces their console. The complete compatibility and target-state guide
+is in [`docs/MIGRATION.md`](docs/MIGRATION.md).
+
+The TUI's `u` screen is the normal way to set user intent; it persists only
+**`autotao.json`** (`usage.reservePercent` and `usage.pace`). Keep
 run-cost estimates, the safety margin, and direct-shell fallback ceilings only in
 **`scripts/budgets.conf`**. The runtime derives its internal ceilings; do not hardcode a
 third copy in a launcher or UI.
@@ -305,15 +319,15 @@ third copy in a launcher or UI.
 
 The harness reads three things, all yours to control:
 
-- **`problems/<slug>.md`** — formal statement, web-verified open status, 2–4 NAMED
-  TARGETS (one marked `ACTIVE TARGET`), an adversarial checklist of this problem's
+- **`problems/<slug>.md`** — formal statement, web-verified open status and competing-claim
+  ledger, a publishable-rung / decisive-bottleneck / full-conjecture target ladder, an adversarial checklist of this problem's
   historical failure modes, a verification recipe, and the rubric score. See
   `problems/TEMPLATE.md`. Write these by hand, or run `harness/formalize.md` on a
   candidate and skim the output before any run uses it.
 - **`problems/INDEX.md`** — the rotation order and the unvetted backlog.
-- **`LOOP_STATE.md`** — a `priority:` list here **overrides rotation entirely**. This is
-  the steering wheel: put a slug at the top and the next iterations go there, regardless
-  of index order. Removing the list returns the loop to rotation.
+- **`LOOP_STATE.md`** — `next_problem:` steers one run; a `priority:` list overrides
+  problem rotation persistently. Neither changes the scheduled ambition tier unless an
+  entry explicitly pins `slug@Tn`.
 
 The loop parks any problem whose ACTIVE target has 2+ consecutive failed runs with no new
 angle recorded, so a dead end can't absorb the whole budget.

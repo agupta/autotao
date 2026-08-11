@@ -32,7 +32,9 @@ export function usageRunway(gate: GateState, nowMs = Date.now()): UsageRunway {
       return {
         tank,
         paceAt: limit,
-        nextRunFits: projected != null && projected <= Math.min(limit, tank.ceiling ?? limit),
+        // Match usage.sh exactly: equality is refused so the estimated burn cannot land
+        // on the launch ceiling and consume the watchdog's overshoot margin.
+        nextRunFits: projected != null && projected < Math.min(limit, tank.ceiling ?? limit),
         paced: gate.policy.pace === "even" && tank.resetAt != null && tank.windowMinutes != null,
         headroom: projected == null ? null : limit - projected,
       }

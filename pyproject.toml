@@ -1,0 +1,15 @@
+[project]
+name = "autotao-harness"
+version = "0.1.0"
+description = "Reproducible Python tools for AutoTao mathematical verification"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "networkx>=3.5",
+    "numpy>=2.3",
+    "ortools>=9.14",
+    "python-sat>=1.8.dev17",
+    "sympy>=1.14",
+]
+
+[tool.uv]
+package = false

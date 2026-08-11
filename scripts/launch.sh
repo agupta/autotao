@@ -39,7 +39,15 @@ if ! bash scripts/usage.sh kill >>"$LOG" 2>&1; then
   exit 3
 fi
 
-# 3. Committed. Detach the run itself.
+# 3. Reap compute orphaned by previous runs. capacity.sh has proved no run is in flight,
+#    and the reaper only matches descendants stamped with AUTOTAO_RUN_ID, so manual work
+#    is invisible. Without this call the dry-run reaper existed but nothing in the launch
+#    path ever used it, allowing detached searches to starve later iterations.
+if [[ -z "${LAUNCH_NO_REAP:-}" ]]; then
+  bash scripts/reap-orphans.sh --kill >>"$LOG" 2>&1 || true
+fi
+
+# 4. Committed. Detach the run itself.
 "${AT_SETSID[@]}" bash scripts/run-once.sh "$ENGINE" >>"$LOG" 2>&1 </dev/null &
 echo "launched $ENGINE pid $! (log $LOG)" | tee -a "$LOG"
 exit 0

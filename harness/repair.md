@@ -1,13 +1,19 @@
 # TRACK B HARNESS — near-miss repair & record constructions
 
 You are hunting for a **machine-checkable artifact**: a counterexample, a record-beating
-construction, or an explicit object whose existence settles the ACTIVE TARGET in the
+construction, or an explicit object whose existence settles the SELECTED TARGET in the
 attached problem file. The deliverable is the object plus a verification script — not
 a proof essay.
 
+Eligibility invariant: the loop driver's current-turn credit/preemption check found no
+credible competing proof or construction pending review and no result covering the
+selected target. Do not start from a file marked `PENDING REVIEW`, `PREEMPTED`, or
+`PARKED`. If Phase 1 finds such a claim, record its artifact and exact overlap and return
+to target selection; do not race it.
+
 ## No continuation — read this before you end any message
 
-You are running as a single unattended `claude -p` invocation. There is no next turn:
+You are running as a single unattended agent invocation. There is no next turn:
 when your message ends, the process exits immediately and everything not yet on disk
 in finished form is gone — background searches included, within seconds. Do not write
 a status update "while the compute burns" expecting to check back; you will not check
@@ -53,6 +59,21 @@ playbook.
   verified partial objects between them, never optimism.
 - Log negative results with reasons: "modification family X cannot work because Y" is a
   lemma; prove it and prune.
+
+### Heavy-computation survival contract
+
+A search or verifier with uncertain memory, more than 512 MB expected use, more than one
+minute runtime, or an unbounded state space is **heavy**. Before it starts, checkpoint the
+current object family, pruning lemmas, code, parameters, and smallest passing probe inside
+the artifact directory. Ship an honest intermediate artifact first when past the loop's
+halfway deadline.
+
+Run only one heavy job at a time, with compute-capable subagents collected or stopped, via
+`bash scripts/safe-compute.sh --memory-mb N --timeout D --log <artifact>/work/<name>.log -- <command>`.
+Prefer sharded or streaming search with atomic checkpoints. If it times out or is killed
+for memory, preserve the log, mark the range unverified, reduce or shard the job, and
+continue from the checkpoint. Never infer nonexistence from an incomplete shard, and never
+let a failed computation prevent the root from completing the output contract.
 
 ## Phase 3 — Certify
 
