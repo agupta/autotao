@@ -3,9 +3,23 @@ import { homedir } from "node:os"
 import { dirname, join, parse, resolve, sep } from "node:path"
 import type { ProjectAdapter } from "./protocol.ts"
 
+export const RUN_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
+export type RunEffort = (typeof RUN_EFFORTS)[number]
+
 export interface AutoTaoConfig {
   schemaVersion: 1
   engine: "claude" | "codex"
+  /**
+   * What the solving agents actually run as. Both are exported into every spawned
+   * command's environment (RepositoryController.run), where run-model.sh and
+   * run-once.sh already prefer $RUN_MODEL / $RUN_EFFORT over their own fallbacks.
+   * Configuring them here is the point: engine, model and effort used to live in
+   * three separate places (this file, LOOP_STATE.md's `run_model:`, and a hardcoded
+   * default inside run-once.sh), so the model an operator thought they had selected
+   * was not necessarily the one that ran.
+   */
+  model: string
+  effort: RunEffort
   project: {
     name: string
     adapter: ProjectAdapter
@@ -42,6 +56,8 @@ export interface ConfigChoices {
 
 const defaults = {
   engine: "claude",
+  model: "claude-fable-5",
+  effort: "xhigh" as const,
   refreshMs: 5000,
   automation: {
     autoLaunch: false,
@@ -49,7 +65,7 @@ const defaults = {
     tickIntervalMs: 0,
   },
   usage: {
-    reservePercent: 5,
+    reservePercent: 10,
     pace: "even" as const,
   },
   commands: {
@@ -185,6 +201,19 @@ export async function loadConfig(start = process.cwd(), selectedPath?: string): 
     throw new Error(`autotao.json engine must be claude or codex, got: ${String(engine)}`)
   }
 
+  // Reject an empty/blank model rather than exporting RUN_MODEL="" — an empty env var
+  // is indistinguishable from "unset" to run-model.sh's ${RUN_MODEL:-...}, so a typo
+  // here would silently fall through to the LOOP_STATE.md value this is meant to
+  // supersede, and the operator would never learn their setting had been ignored.
+  const model = raw.model ?? defaults.model
+  if (typeof model !== "string" || model.trim().length === 0) {
+    throw new Error("autotao.json model must be a non-empty string (a full model id, e.g. claude-fable-5)")
+  }
+  const effort = raw.effort ?? defaults.effort
+  if (!RUN_EFFORTS.includes(effort as RunEffort)) {
+    throw new Error(`autotao.json effort must be one of ${RUN_EFFORTS.join("|")}, got: ${String(effort)}`)
+  }
+
   const refreshMs = raw.refreshMs ?? defaults.refreshMs
   if (!Number.isInteger(refreshMs) || Number(refreshMs) < 1000 || Number(refreshMs) > 60000) {
     throw new Error("autotao.json refreshMs must be an integer from 1000 to 60000")
@@ -196,8 +225,8 @@ export async function loadConfig(start = process.cwd(), selectedPath?: string): 
   const autoLaunch = automation.autoLaunch ?? defaults.automation.autoLaunch
   if (typeof autoLaunch !== "boolean") throw new Error("autotao.json automation.autoLaunch must be a boolean")
   const reservePercent = usage.reservePercent ?? defaults.usage.reservePercent
-  if (!Number.isInteger(reservePercent) || Number(reservePercent) < 0 || Number(reservePercent) > 90) {
-    throw new Error("autotao.json usage.reservePercent must be an integer from 0 to 90")
+  if (!Number.isInteger(reservePercent) || Number(reservePercent) < 5 || Number(reservePercent) > 90) {
+    throw new Error("autotao.json usage.reservePercent must be an integer from 5 to 90")
   }
   const pace = usage.pace ?? defaults.usage.pace
   if (pace !== "even" && pace !== "eager") {
@@ -209,6 +238,8 @@ export async function loadConfig(start = process.cwd(), selectedPath?: string): 
     config: {
       schemaVersion: 1,
       engine,
+      model: model.trim(),
+      effort: effort as RunEffort,
       project: { name: project.name, adapter: project.adapter },
       refreshMs: Number(refreshMs),
       automation: {

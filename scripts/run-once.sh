@@ -43,13 +43,16 @@ trap 'rm -f "$LOCK"' EXIT
 # gate can never check a different model's tank than the one actually launched.
 read -r RESOLVED_MODEL _MODEL_KEY < <(bash "$(dirname "$0")/run-model.sh")
 
-# Reasoning effort for the attempt. Until now the claude branch passed no --effort at
-# all, so runs silently inherited the operator's interactive `effortLevel` from
-# ~/.claude/settings.json (currently "medium") — a setting changed for interactive
-# comfort would quietly re-tier every unattended attempt. Pin it here for the same
-# reason RESOLVED_MODEL is pinned: what the loop spends should not depend on a global
-# the loop does not own. xhigh matches the default invoke-agent.sh already uses for
-# supervision/triage agents. Valid: low|medium|high|xhigh|max.
+# Reasoning effort for the attempt. Normally supplied as RUN_EFFORT by the app from
+# autotao.json's `effort`, alongside RUN_ENGINE and RUN_MODEL — see scripts/run-model.sh
+# for why those three are configured in one place.
+#
+# Until now the claude branch passed no --effort at all, so runs silently inherited the
+# operator's interactive `effortLevel` from ~/.claude/settings.json (medium), and
+# env-sanitize.sh unsets CLAUDE_EFFORT so there was no per-run route in either. A
+# setting changed for interactive comfort must not re-tier every unattended attempt.
+# The fallback is xhigh, matching what invoke-agent.sh already uses for supervision and
+# triage agents. Valid: low|medium|high|xhigh|max.
 RUN_EFFORT="${RUN_EFFORT:-xhigh}"
 case "$RUN_EFFORT" in
   low|medium|high|xhigh|max) ;;
