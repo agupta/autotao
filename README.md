@@ -291,29 +291,19 @@ still passes the existing usage, memory, and one-run-at-a-time gates. Press `Ent
 run's readable work transcript, or `s` to browse current and past sessions. Transcript
 views support arrows, Page Up/Down, Home/End, and live-follow mode. Press `Space` to
 pause/resume autopilot, `n` to ask for one checked run now, `?` for an explanation, and
-`q` to quit. `bash scripts/supervise-console.sh` remains a compatibility entry point to
-the same app.
+`q` to quit.
 
-Existing installations can perform a one-time import of durable legacy-console state:
-
-```bash
-bash scripts/autotao.sh import
-```
-
-Imported and last-known runtime state lives in the private workspace's ignored
-`.autotao/state.json`; it is never part of the mathematical ledger or a release artifact. See
+Last-known runtime state lives in the private workspace's ignored `.autotao/state.json`; it
+is never part of the mathematical ledger or a release artifact. See
 [`apps/autotao/README.md`](apps/autotao/README.md) for development, the versioned JSON
-protocol, and standalone builds.
+protocol, and standalone builds. Moving an existing research repository in is covered by
+[`docs/MIGRATION.md`](docs/MIGRATION.md).
 
-Existing `new-math` research repositories can remain intact as local workspaces while the
-AutoTao binary replaces their console. The complete compatibility and target-state guide
-is in [`docs/MIGRATION.md`](docs/MIGRATION.md).
-
-The TUI's `u` screen is the normal way to set user intent; it persists only
-**`autotao.json`** (`usage.reservePercent` and `usage.pace`). Keep
-run-cost estimates, the safety margin, and direct-shell fallback ceilings only in
-**`scripts/budgets.conf`**. The runtime derives its internal ceilings; do not hardcode a
-third copy in a launcher or UI.
+Usage policy has exactly two homes, and neither duplicates the other. The `u` screen
+persists operator intent to **`autotao.json`** (`usage.reservePercent`, `usage.pace`);
+run-cost estimates, the safety margin, and direct-shell fallback ceilings live only in
+**`scripts/budgets.conf`**. The runtime derives its internal ceilings from those; do not
+hardcode a third copy in a launcher or UI.
 
 ## Bringing your own problems
 

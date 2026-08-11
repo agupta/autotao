@@ -1,7 +1,6 @@
 import { access, readFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join, parse, resolve, sep } from "node:path"
-import type { ProjectAdapter } from "./protocol.ts"
 
 export const RUN_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
 export type RunEffort = (typeof RUN_EFFORTS)[number]
@@ -22,7 +21,7 @@ export interface AutoTaoConfig {
   effort: RunEffort
   project: {
     name: string
-    adapter: ProjectAdapter
+    adapter: "autotao"
   }
   refreshMs: number
   automation: {
@@ -193,7 +192,7 @@ export async function loadConfig(start = process.cwd(), selectedPath?: string): 
   if (!project || typeof project.name !== "string" || project.name.length === 0) {
     throw new Error("autotao.json project.name must be a non-empty string")
   }
-  if (project.adapter !== "autotao" && project.adapter !== "legacy-new-math") {
+  if (project.adapter !== "autotao") {
     throw new Error(`Unsupported adapter: ${String(project.adapter)}`)
   }
   const engine = raw.engine ?? defaults.engine

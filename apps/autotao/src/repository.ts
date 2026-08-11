@@ -9,7 +9,6 @@ import { latestAgentMessage, parseResultMarkdown, problemFromDirectory } from ".
 import {
   SNAPSHOT_SCHEMA_VERSION,
   type ActionResult,
-  type AutoTaoState,
   type AutoTaoController,
   type GateState,
   type LiveAttempt,
@@ -20,7 +19,7 @@ import {
   type UsageTank,
   type UsagePolicy,
 } from "./protocol.ts"
-import { LocalStateStore, overlayLegacyConsoleSample, readLegacyConsoleSample } from "./state-store.ts"
+import { LocalStateStore } from "./state-store.ts"
 import { parseSessionLog } from "./session-log.ts"
 
 interface CommandResult {
@@ -432,19 +431,10 @@ export class RepositoryController implements AutoTaoController {
       const markdown = await optionalRead(join(this.root, "problems", `${slug}.md`))
       if (markdown) snapshot.problemBrief = parseProblemFile(slug, markdown)
     }
-    const legacySample = await readLegacyConsoleSample(this.root)
-    const merged = overlayLegacyConsoleSample(snapshot, legacySample)
-    await this.stateStore.updateSnapshot(merged).catch(() => undefined)
-    return merged
+    await this.stateStore.updateSnapshot(snapshot).catch(() => undefined)
+    return snapshot
   }
 
-  async importState(): Promise<AutoTaoState> {
-    const [snapshot, legacySample] = await Promise.all([this.snapshot(), readLegacyConsoleSample(this.root)])
-    // An explicit migration imports the last durable console sample even after
-    // the old console has stopped. Normal live refreshes require a fresh cache.
-    const merged = overlayLegacyConsoleSample(snapshot, { ...legacySample, fresh: true })
-    return await this.stateStore.importLegacy(merged, legacySample.imported)
-  }
 
   async listSessions(): Promise<SessionSummary[]> {
     return await sessionSummaries(this.root)

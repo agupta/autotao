@@ -5,8 +5,8 @@
 #   explicit argument > RUN_ENGINE environment variable > claude
 #
 # Examples:
-#   bash scripts/supervise-console.sh          # Claude Code (default)
-#   bash scripts/supervise-console.sh codex    # Codex
+#   bash scripts/autotao.sh                    # Claude Code (default)
+#   RUN_ENGINE=codex bash scripts/autotao.sh   # Codex
 #   RUN_ENGINE=codex bash scripts/launch.sh    # Codex
 set -euo pipefail
 

@@ -1,6 +1,6 @@
 # autotao autonomous loop — durable system-cron version.
 # NOT INSTALLED as of 2026-07-24: the operator prefers the foreground supervision
-# console (scripts/supervise-console.sh in tmux, AUTO_LAUNCH=1) as the sole
+# console (scripts/autotao.sh in tmux, automation.autoLaunch) as the sole
 # maintainer of runs — it shows live progress and does the same gated
 # launches. Keep this file only as the fallback recipe if the console stops
 # being used.

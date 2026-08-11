@@ -6,8 +6,7 @@ versioned snapshot and invokes only the explicit commands in `autotao.json`.
 
 The native `autotao` adapter reads the run lock, raw-log metadata, quota predicates,
 supervisor events, paper requests, and mathematical attempt ledger already maintained by
-the shell harness. The `legacy-new-math` adapter name is retained as a compatibility alias
-for existing installations; both implement the same protocol and UI.
+the shell harness.
 
 Automation is explicit in `autotao.json`. The checked-in harness config enables a
 15-minute supervisor tick and gated auto-launch checks. Launch commands remain the final
@@ -62,20 +61,17 @@ The workspace initializer and CLI installer register their checkout as the globa
 a distinct local AutoTao project, startup offers global versus local state. `--global`, `--local`, and
 `AUTOTAO_SCOPE=global|local` bypass the chooser; noninteractive commands prefer global.
 
-## State migration
+## Persisted state
 
-Existing installations may import the last durable state written by the retired Bash
-console once:
+Every snapshot is written atomically, owner-only, to `.autotao/state.json`; the whole
+`.autotao/` directory is ignored by git. Inspect the last one with:
 
 ```bash
-bash scripts/autotao.sh import
 bash scripts/autotao.sh state --json
 ```
 
-The import whitelists the effective gate, engine, reset, lifecycle cursors, and escalation
-marker. It never copies raw logs or process environments. AutoTao then maintains its
-atomic last-known snapshot at `.autotao/state.json`; the complete `.autotao/` directory is
-ignored by git. Normal snapshot updates are runtime persistence, not repeated imports.
+This is runtime persistence only. Raw logs and process environments are never copied into
+it, and it is never part of the mathematical ledger or a release artifact.
 
 ## Distribution
 

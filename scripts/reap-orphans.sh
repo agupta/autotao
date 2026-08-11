@@ -42,7 +42,7 @@ at_require_bash || exit 1
 
 DO_KILL=0; OLDER_THAN=0; GRACE=10; QUIET=0
 # Never reap these: detached-by-design supervisors/babysitters.
-REAP_EXCLUDE="${REAP_EXCLUDE:-babysit|supervise-console|supervisor-tick|reap-orphans}"
+REAP_EXCLUDE="${REAP_EXCLUDE:-babysit|autotao|supervisor-tick|reap-orphans}"
 while (( $# )); do
   case "$1" in
     --kill)       DO_KILL=1 ;;

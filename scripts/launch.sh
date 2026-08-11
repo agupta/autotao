@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The ONE way to start a solve iteration. Checks synchronously, then detaches.
 #
-# Callers (supervise-console.sh, supervisor-tick.sh, harness/supervisor.md) each
+# Callers (the autotao console, supervisor-tick.sh, harness/supervisor.md) each
 # used to reassemble this sequence themselves, and they disagreed: the console
 # ran the gate then launched detached and never saw the launcher's exit code, so
 # when run-once.sh began refusing (exit 3) the console recorded every refusal as

@@ -53,6 +53,18 @@ All notable software changes to AutoTao are recorded here. Mathematical work bel
 - Panel content that was taller than its panel spilled outside the border and painted
   over whatever occupied those rows, so two lines merged into one and read as corrupted
   text — `20h 23m elapsed` arriving as `208hi23moelapsed`. Panels now clip their content.
+- The orphan reaper protected the retired console's process name but not `autotao`, so a
+  running console was reapable. It now excludes the name it actually runs under.
+
+### Removed
+
+- The legacy-console compatibility layer: `autotao import`, `attempts/supervision/.gate.cache`
+  overlay, and the `legacy-new-math` adapter alias. Nothing has written that cache since the
+  Bash console was retired, yet it was read on every refresh — six file reads per tick behind
+  a second, silently-overriding source of truth for gate state, engine, and model. The live
+  predicates in `scripts/` are now the only source. `autotao.json` must set
+  `project.adapter: "autotao"`.
+- `scripts/supervise-console.sh`, a shim that only re-executed `scripts/autotao.sh`.
 
 ## 0.1.0 — 2026-08-10
 

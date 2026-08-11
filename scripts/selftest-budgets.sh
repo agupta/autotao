@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Assert the budget invariants. Run by supervise-console.sh at startup, so a bad
+# Assert the budget invariants. Run at console startup and in CI, so a bad
 # edit to budgets.conf fails in 1s instead of 60s into a run that was already paid
 # for. Exit 0 all good · 1 an invariant is violated.
 #

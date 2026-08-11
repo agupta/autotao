@@ -27,10 +27,9 @@ cd /path/to/new-math
 autotao --local
 ```
 
-An existing `autotao.json` with `project.adapter: "legacy-new-math"` remains supported as
-a compatibility alias. The TUI reads the same lock, ledger, raw sessions, limits, paper
-requests, and supervision markers. Run `autotao import` once only if you need the last
-durable sample from the retired Bash console; live snapshots do not require it.
+Set `project.adapter` to `"autotao"`; it is the only accepted value. The TUI reads the
+same lock, ledger, raw sessions, limits, paper requests, and supervision markers, and
+samples them live — there is no import step.
 
 For a fresh project, use `bash scripts/init-workspace.sh` from the AutoTao checkout. That
 creates an ignored private clone containing the current harness. Move mathematical state
@@ -71,6 +70,4 @@ SOURCING and infrastructure rows do not count.
 
 Campaign-specific probes, private problem files, licensed paper text, raw sessions,
 operator credentials, and historical attempt artifacts do not belong in the public
-repository. They remain in the private workspace. The `legacy-new-math` adapter name may
-be removed in a future major version after existing workspaces have changed it to
-`"autotao"`; it has no behavior distinct from the native adapter today.
+repository. They remain in the private workspace.

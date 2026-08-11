@@ -14,8 +14,7 @@ function help(): string {
 
 Usage:
   autotao                 Open the terminal dashboard
-  autotao import [--json] Import legacy console state into .autotao/state.json
-  autotao state --json    Print AutoTao's persisted last-known state
+  autotao state --json    Print the last snapshot AutoTao persisted
   autotao snapshot --json Print one versioned state snapshot
   autotao doctor          Validate configuration and adapter paths
   autotao update          Install the latest release
@@ -162,21 +161,12 @@ if (args[0] === "snapshot") {
   process.exit(0)
 }
 
-if (args[0] === "import") {
-  const state = await controller.importState()
-  if (args.includes("--json")) console.log(JSON.stringify(state, null, 2))
-  else {
-    console.log(`Imported legacy console state into ${loaded.root}/.autotao/state.json`)
-    console.log(`engine=${state.snapshot.engine} gate=${state.snapshot.gate.phase} run=${state.snapshot.run.phase}`)
-  }
-  process.exit(0)
-}
 
 if (args[0] === "state") {
   const { LocalStateStore } = await import("./state-store.ts")
   const state = await new LocalStateStore(loaded.root).read()
   if (!state) {
-    console.error("No imported AutoTao state. Run `autotao import` first.")
+    console.error("No persisted state yet. Run `autotao snapshot` or open the dashboard first.")
     process.exit(1)
   }
   console.log(args.includes("--json") ? JSON.stringify(state, null, 2) : state)

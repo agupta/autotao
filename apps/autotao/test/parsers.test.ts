@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { parseKeyValues, parseLatestLedger, parsePapersWanted, parsePipelineEvents } from "../src/parsers.ts"
 
-describe("legacy state parsers", () => {
+describe("harness output parsers", () => {
   test("parses machine-readable usage output without shell eval", () => {
     const values = parseKeyValues(`USAGE_ENGINE=codex
 USAGE_WEEK=41

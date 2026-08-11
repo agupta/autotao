@@ -16,7 +16,7 @@
       "required": ["name", "adapter"],
       "properties": {
         "name": { "type": "string", "minLength": 1 },
-        "adapter": { "enum": ["autotao", "legacy-new-math"] }
+        "adapter": { "const": "autotao" }
       }
     },
     "refreshMs": { "type": "integer", "minimum": 1000, "maximum": 60000 },

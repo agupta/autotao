@@ -7,7 +7,7 @@ import type { ProjectSnapshot, SessionSummary, SessionTranscript } from "../src/
 const snapshot: ProjectSnapshot = {
   schemaVersion: 1,
   sampledAt: "2026-08-09T02:00:00.000Z",
-  project: { name: "new-math", root: "/workspace/new-math", adapter: "legacy-new-math" },
+  project: { name: "research", root: "/workspace/research", adapter: "autotao" },
   engine: "codex",
   model: "gpt-5.6-sol",
   run: {

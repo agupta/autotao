@@ -1,7 +1,5 @@
 export const SNAPSHOT_SCHEMA_VERSION = 1 as const
 
-export type ProjectAdapter = "autotao" | "legacy-new-math"
-
 export type Health = "healthy" | "warning" | "critical" | "unknown"
 export type RunPhase = "running" | "idle" | "stale-lock"
 export type GatePhase = "open" | "closed" | "unknown"
@@ -74,7 +72,7 @@ export interface ProjectSnapshot {
   project: {
     name: string
     root: string
-    adapter: ProjectAdapter
+    adapter: "autotao"
   }
   engine: string
   model: string
@@ -96,19 +94,6 @@ export interface ProjectSnapshot {
   liveAttempt?: LiveAttempt | null
   pipeline: PipelineEvent[]
   alerts: string[]
-}
-
-export interface LegacyConsoleImport {
-  importedAt: string
-  gateCacheSampledAt: string | null
-  engine: string | null
-  modelKey: string | null
-  resetAt: number | null
-  uncapped: boolean
-  lastLaunchAt: number | null
-  lastRefusalAt: number | null
-  processedLog: string | null
-  escalationPending: boolean
 }
 
 export interface LiveAttempt {
@@ -134,7 +119,6 @@ export interface AutoTaoState {
   schemaVersion: typeof SNAPSHOT_SCHEMA_VERSION
   updatedAt: string
   snapshot: ProjectSnapshot
-  legacyImport: LegacyConsoleImport | null
 }
 
 export interface ActionResult {
@@ -167,7 +151,6 @@ export interface SessionTranscript {
 
 export interface AutoTaoController {
   snapshot(): Promise<ProjectSnapshot>
-  importState(): Promise<AutoTaoState>
   listSessions(): Promise<SessionSummary[]>
   readSession(id: string): Promise<SessionTranscript>
   updateUsagePolicy(policy: UsagePolicy): Promise<ActionResult>
