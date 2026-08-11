@@ -43,6 +43,19 @@ trap 'rm -f "$LOCK"' EXIT
 # gate can never check a different model's tank than the one actually launched.
 read -r RESOLVED_MODEL _MODEL_KEY < <(bash "$(dirname "$0")/run-model.sh")
 
+# Reasoning effort for the attempt. Until now the claude branch passed no --effort at
+# all, so runs silently inherited the operator's interactive `effortLevel` from
+# ~/.claude/settings.json (currently "medium") — a setting changed for interactive
+# comfort would quietly re-tier every unattended attempt. Pin it here for the same
+# reason RESOLVED_MODEL is pinned: what the loop spends should not depend on a global
+# the loop does not own. xhigh matches the default invoke-agent.sh already uses for
+# supervision/triage agents. Valid: low|medium|high|xhigh|max.
+RUN_EFFORT="${RUN_EFFORT:-xhigh}"
+case "$RUN_EFFORT" in
+  low|medium|high|xhigh|max) ;;
+  *) echo "RUN_EFFORT must be one of low|medium|high|xhigh|max (got '$RUN_EFFORT')" >&2; exit 2 ;;
+esac
+
 # --- Memory discipline for this 3.7GB box (OOM killed a run + the supervisor on
 # 2026-07-23 when concurrent subagent processes multiplied past RAM). SCOPED to the
 # headless run only — the user's global settings.json is untouched. Two distinct knobs:
@@ -223,6 +236,7 @@ case "$ENGINE" in
     CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 \
     "${SETSID[@]}" "${TCMD[@]}" claude -p "$PROMPT" "${RESUME_ARGS[@]}" \
       --model "$RESOLVED_MODEL" \
+      --effort "$RUN_EFFORT" \
       --allowedTools "$ALLOW" \
       --disallowedTools "$DISALLOW" \
       --output-format stream-json --verbose \
