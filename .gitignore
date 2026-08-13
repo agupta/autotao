@@ -2,17 +2,23 @@ __pycache__/
 *.pyc
 nohup.out
 .venv/
-.claude/settings.local.json
+# Local agent configuration and credentials.
+.env
+.env.*
+!.env.example
+.claude/
+.codex/
 attempts/.run.lock
 
 # AutoTao's imported and last-known runtime state is machine-local. The portable
 # project contract is autotao.json; state snapshots must never enter git.
 .autotao/
+/autotao.json.tmp-*
 
 # Raw agent logs: large, and they contain whatever the run happened to print.
 # Keep them locally (the triage tier reads them); never publish them.
-attempts/raw-logs/*.log
-attempts/raw-logs/*.jsonl
+attempts/raw-logs/*
+!attempts/raw-logs/.gitkeep
 
 # Supervision scratch state.
 attempts/supervision/*
@@ -22,6 +28,7 @@ attempts/supervision/*
 # Metadata (papers/INDEX.tsv, papers/WANTED.md) is tracked so the record of what
 # was fetched — and what is still missing — survives in git.
 papers/*.pdf
+papers/*.pdf.part
 papers/*.txt
 papers/*.notpdf
 papers/.*.err
@@ -30,3 +37,8 @@ papers/.*.err
 # but must never enter git history — one crashed run wrote 397MB of these.
 attempts/**/*.out
 attempts/**/s_all_*.txt
+
+# One-off local release reviews and handoff notes are operator scratch, not
+# product documentation. Durable release notes belong in CHANGELOG.md.
+release-audit/
+CLAUDE_RELEASE_AUDIT_HANDOFF.md

@@ -19,29 +19,29 @@ tool's background mode additionally re-invokes you the moment a run exits.
 
 ## Mechanics you have
 
-- Launch a run: `bash scripts/launch.sh` — the ONE entrypoint. It runs the launch
+- Launch a run: `bash scripts/launch.sh` — the ONE entrypoint. Claude is the default;
+  `bash scripts/launch.sh codex` or `RUN_ENGINE=codex` switches the whole pipeline. It runs the launch
   gate and the watchdog preflight synchronously, detaches the run, and returns a
   real exit code: 0 launched · 1 usage ceiling · 2 memory floor · 3 meters unknown
   · 4 a run is already in flight. Never assemble the sequence by hand and never
   call `run-once.sh` directly for a loop run; every caller that did so drifted.
-  (`run-once.sh claude bench-<slug>` remains correct for benchmarks.)
+  (`run-once.sh <engine> bench-<slug>` remains correct for benchmarks.)
 - Never bypass the gate, never raise its budgets — raising a budget to unblock the
   pipeline is the operator's call, not yours. Ceilings live in `scripts/budgets.conf` and
   nowhere else; read them there rather than trusting a number quoted in prose. The
   kill ceilings are DERIVED from the gate ceilings in that file, so do not add a
   standalone one: two independent copies of a budget is the exact defect that
   killed three runs on 2026-07-26.
-- The run model is whatever `LOOP_STATE.md`'s `run_model:` line says (currently
-  `claude-opus-5` — use the full id, the `opus-5` alias does not resolve). A
-  `RUN_MODEL` env var overrides it. Do not assume Fable: the gate resolves the
-  same way and checks the weekly tank the *next* run will actually draw from.
-  Note only some models have a per-model weekly tank (currently just fable); for
-  models without one the aggregate weekly tank is the binding constraint.
+- Codex uses its configured model unless `CODEX_MODEL` overrides it. Claude uses
+  `LOOP_STATE.md`'s `run_model:` value unless `RUN_MODEL` overrides it. Engine and quota
+  predicate are resolved once, so the gate checks the account the next run draws from.
 - Runs are time-capped via `RUN_TIMEOUT_MIN` (loop default 90, benchmarks
   uncapped) and stream to `attempts/raw-logs/`.
-- Python for verification: `.venv/bin/python` (networkx + sympy).
-- Watch a live run without disturbing it: tail its raw log; the session transcript
-  JSONLs are under `~/.claude/projects/<slugified-repo-path>/`.
+- Python for verification: the workspace's Python environment; prefer `uv run python`
+  when a `pyproject.toml` is present, otherwise `.venv/bin/python`.
+- Watch a live run without disturbing it through the TUI (`Enter`) or tail its raw log.
+  Claude sessions live under `~/.claude/projects/`; Codex sessions under
+  `~/.codex/sessions/`.
 
 ## The cycle
 

@@ -14,8 +14,8 @@ Automation is explicit in `autotao.json`. The checked-in harness config enables 
 authority and re-run quota, memory, and run-lock checks.
 
 The usage policy is expressed as a reserve, not an internal gate ceiling. With
-`reservePercent: 5` and `pace: "even"`, AutoTao draws a straight usage runway from the
-window start to 95% at reset. Ordinary interactive usage counts toward the runway and
+`reservePercent: 10` and `pace: "even"`, AutoTao draws a straight usage runway from the
+window start to 90% at reset. Ordinary interactive usage counts toward the runway and
 AutoTao starts work only when the next estimated run fits below it. `pace: "eager"` skips
 the time-based runway and consumes available headroom immediately.
 
@@ -24,7 +24,8 @@ every status, launch, and supervisor command. It therefore survives terminal and
 restarts instead of depending on an inherited shell environment.
 
 The persistent controls use plain-language actions: `Enter` follows the current run's
-readable work transcript, `s` browses current and past sessions, `Space` pauses or resumes
+readable work transcript, `s` browses current and past sessions, `u` edits the protected
+allowance and pacing policy, `Space` pauses or resumes
 autopilot, `n` starts one checked run, `?` explains the screen, and `q` quits. In a
 transcript, arrows and Page Up/Down scroll, Home/End jump, and `f` toggles live follow.
 Refresh (`r`) and a manual maintenance tick (`t`) remain available from the help view.

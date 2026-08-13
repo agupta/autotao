@@ -25,7 +25,7 @@ Usage:
   autotao --version       Print the version
   autotao --help          Show this help
 
-Dashboard keys: Enter live work · s session history · Space pause/resume · n run once · ? help · q quit`
+Dashboard keys: Enter live work · s sessions · u usage plan · Space pause/resume · n run once · ? help · q quit`
 }
 
 function parseScope(rawArgs: string[]): { args: string[]; scope: ConfigScope | null } {
@@ -93,6 +93,7 @@ async function doctor(root: string): Promise<number> {
     "scripts/run-model.sh",
     "scripts/invoke-agent.sh",
     "scripts/result-info.sh",
+    "scripts/safe-compute.sh",
     "attempts/LOG.md",
   ]
   let ok = true

@@ -9,7 +9,7 @@ where candidates come from.
 
 ## Vetted (files in this directory)
 
-| Problem | Track | Score | Status verified | ACTIVE target | Verification load |
+| Problem | Track | Score | Status / credit checked | ACTIVE target | Verification load |
 |---|---|---|---|---|---|
 | _(none yet — add your first problem)_ | | | | | |
 
@@ -18,8 +18,9 @@ Columns:
 - **Track** — A (proof-shaped, `harness/portfolio.md`), B (certificate-shaped,
   `harness/repair.md`), or A+B if the named targets are mixed.
 - **Score** — total from `criteria.md`, out of 12.
-- **Status verified** — date the open status was last confirmed from two current sources.
-  The loop re-checks anything older than 7 days before spending a run on it.
+- **Status / credit checked** — dates when official status and competing claims were last
+  checked. Official status may be reused for 7 days; the credit/preemption check runs
+  before every attempt.
 - **ACTIVE target** — the named partial the absolutist prompt is pointed at, not the full
   conjecture.
 - **Verification load** — `mechanical` / `elementary-readable` / `needs-expert`. Prefer

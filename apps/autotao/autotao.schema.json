@@ -8,6 +8,8 @@
   "properties": {
     "schemaVersion": { "const": 1 },
     "engine": { "enum": ["claude", "codex"], "default": "claude" },
+    "model": { "type": "string", "minLength": 1, "default": "claude-fable-5" },
+    "effort": { "enum": ["low", "medium", "high", "xhigh", "max"], "default": "xhigh" },
     "project": {
       "type": "object",
       "additionalProperties": false,
@@ -36,7 +38,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "reservePercent": { "type": "integer", "minimum": 0, "maximum": 90, "default": 5 },
+        "reservePercent": { "type": "integer", "minimum": 5, "maximum": 90, "default": 10 },
         "pace": { "enum": ["even", "eager"], "default": "even" }
       }
     },

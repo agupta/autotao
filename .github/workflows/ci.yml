@@ -222,6 +222,12 @@ jobs:
       - name: Budget invariants hold
         run: bash scripts/selftest-budgets.sh
 
+      - name: Complete research-harness contracts are present
+        run: bash scripts/selftest-harness.sh
+
+      - name: Heavy computation is contained and returns output
+        run: bash scripts/safe-compute.sh --memory-mb 768 --timeout 10s --label ci -- bash -c 'printf safe-compute-ok'
+
       - name: Capacity predicate answers with a documented exit code
         run: |
           bash scripts/capacity.sh; rc=$?

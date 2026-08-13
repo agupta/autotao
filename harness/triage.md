@@ -4,10 +4,11 @@ You are a triage agent (small model, keep it short and mechanical). A headless
 research run in this repository has exited and needs its books settled. Do ONLY
 the following, then stop.
 
-1. Identify the newest raw log: `ls -t attempts/raw-logs/*.log | head -1`. Read its
-   LAST line (a JSON `result` object: `is_error`, `subtype`, `terminal_reason`,
-   `duration_ms`, `num_turns`) and skim its final ~5 assistant messages for what
-   the run was doing. Read the last ~10 lines of `attempts/LOG.md`.
+1. Identify the newest raw log: `ls -t attempts/raw-logs/*.log | head -1` and determine
+   its engine from the filename. Claude logs end in a JSON `result` object (`is_error`,
+   `subtype`, `terminal_reason`, `duration_ms`, `num_turns`); Codex JSONL logs end in
+   `turn.completed` or `turn.failed` and begin with `thread.started`. Read the terminal
+   event, skim the final ~5 agent messages, and read the last ~10 ledger lines.
 
 2. **If `is_error` is true, LOOK AT THE ARTIFACT DIRECTORY BEFORE JUDGING.** Find it
    with `ls -td attempts/*/ | head -3` (the run's own dir is the newest one whose
@@ -50,8 +51,9 @@ the following, then stop.
      claim, anything you cannot classify confidently, or — most commonly here —
      **step 2 found substantive work in the artifact dir that was never shipped**.
      That case wants a salvage iteration, and only tier 2 can run one.
-   - `IDLE` — the run completed cleanly (`is_error` false) AND a LOG.md line for
-     it already exists. BOTH must hold. If `is_error` is true you have work to do
+   - `IDLE` — the run completed cleanly (`is_error` false or `turn.completed`) AND a
+     LOG.md line already exists. BOTH must hold. If the terminal event reports an error
+     you have work to do
      in steps 2 and 3 — a crashed run has almost never logged itself, and IDLE
      over one leaves an orphaned artifact with no entry in the denominator. On
      2026-07-25 that happened: a run that crashed with `error_during_execution`

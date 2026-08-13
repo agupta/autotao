@@ -28,9 +28,13 @@ else
 fi
 
 # --- hard requirements ---
-for tool in git awk sed grep python3; do
+for tool in git awk sed grep python3 jq curl; do
   if command -v "$tool" >/dev/null 2>&1; then ok "$tool"; else bad "$tool"; fi
 done
+
+if ! command -v jq >/dev/null 2>&1 && [[ "$AT_OS" == "Darwin" ]]; then
+  hint "brew install jq"
+fi
 
 if (( ${#AT_TIMEOUT[@]} )); then
   ok "timeout (${AT_TIMEOUT[0]})"
@@ -55,6 +59,13 @@ fi
 
 command -v bun >/dev/null 2>&1 && ok "bun $(bun --version)" \
   || warn "bun absent — needed only to build the console from source, not to run a release binary"
+
+if command -v uv >/dev/null 2>&1; then
+  ok "uv $(uv --version | awk '{print $2}')"
+else
+  warn "uv absent — verification dependencies will not be reproducibly locked"
+  hint "install uv, then run: uv sync"
+fi
 
 # --- soft requirements ---
 if (( ${#AT_SETSID[@]} )); then

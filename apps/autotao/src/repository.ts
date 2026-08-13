@@ -351,6 +351,15 @@ export class RepositoryController implements AutoTaoController {
     const finishAt = String(100 - this.config.usage.reservePercent)
     return runCommand(argv, this.root, timeoutMs, {
       RUN_ENGINE: this.config.engine,
+      // RUN_MODEL / RUN_EFFORT make autotao.json the single place that decides what
+      // the solving agents run as. Both scripts already treat these as the highest
+      // precedence input (run-model.sh: ${RUN_MODEL:-<LOOP_STATE.md>}, run-once.sh:
+      // ${RUN_EFFORT:-xhigh}), so nothing downstream needed to change to honor them.
+      // Exported for EVERY spawned command, not just launch, so that the usage gate
+      // reads the same model's tank that the run it is gating will actually draw from
+      // — scripts/run-model.sh exists precisely because those two once disagreed.
+      RUN_MODEL: this.config.model,
+      RUN_EFFORT: this.config.effort,
       AUTOTAO_FINISH_AT: finishAt,
     })
   }

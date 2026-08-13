@@ -23,11 +23,7 @@ mkdir -p attempts/raw-logs
 # CLAUDE_PID, CLAUDE_CODE_SESSION_ID, ...); strip the markers so the run is a
 # first-class root session no matter who launched it, and setsid so parent-side
 # job-control signals / tool timeouts can't reach the run's process group.
-for v in CLAUDECODE CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ID \
-         CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_PID CLAUDE_CODE_ENTRYPOINT \
-         CLAUDE_EFFORT AI_AGENT CLAUDE_CODE_SSE_PORT CLAUDE_CODE_TASK_ID; do
-  unset "$v" 2>/dev/null || true
-done
+source "$(dirname "$0")/env-sanitize.sh"
 SETSID=("${AT_SETSID[@]}")
 
 # One-run-at-a-time lock (paired with should-run.sh's OOM guard). Stale locks from a
@@ -42,6 +38,20 @@ trap 'rm -f "$LOCK"' EXIT
 # Resolve the attempt model. Shared with usage.sh via scripts/run-model.sh so the
 # gate can never check a different model's tank than the one actually launched.
 read -r RESOLVED_MODEL _MODEL_KEY < <(bash "$(dirname "$0")/run-model.sh")
+
+# Reasoning effort for the attempt. Until now the claude branch passed no --effort at
+# all, so runs silently inherited the operator's interactive `effortLevel` from
+# ~/.claude/settings.json (currently "medium") -- and env-sanitize.sh deliberately
+# unsets CLAUDE_EFFORT, so there was no way to steer it per-run either. A setting
+# changed for interactive comfort should not re-tier every unattended attempt. Pin it
+# here for the same reason RESOLVED_MODEL is pinned: what the loop spends must not
+# depend on a global the loop does not own. xhigh matches the default invoke-agent.sh
+# already uses for supervision/triage. Valid: low|medium|high|xhigh|max.
+RUN_EFFORT="${RUN_EFFORT:-xhigh}"
+case "$RUN_EFFORT" in
+  low|medium|high|xhigh|max) ;;
+  *) echo "RUN_EFFORT must be one of low|medium|high|xhigh|max (got '$RUN_EFFORT')" >&2; exit 2 ;;
+esac
 
 # --- Memory discipline for this 3.7GB box (OOM killed a run + the supervisor on
 # 2026-07-23 when concurrent subagent processes multiplied past RAM). SCOPED to the
@@ -80,9 +90,9 @@ fi
 # RESUME_SESSION=<session-id>: continue an interrupted run (rate-limit kill, watchdog
 # kill, crash) with its full context instead of starting fresh. The original rules
 # still bind; the prompt swaps to a continuation brief.
-RESUME_ARGS=()
+CLAUDE_RESUME_ARGS=()
 if [[ -n "${RESUME_SESSION:-}" ]]; then
-  RESUME_ARGS=(--resume "$RESUME_SESSION")
+  CLAUDE_RESUME_ARGS=(--resume "$RESUME_SESSION")
   TAG="${TAG}-resume"
   PROMPT="You are being resumed after an interruption (usage-limit outage, watchdog
 kill, or crash). Every rule from your original prompt still binds — zero network for
@@ -145,7 +155,7 @@ fi
 # also invoked directly (harness/supervisor.md) and this is the script that spends.
 # Since budgets.conf derives the kill ceilings from the gate's, this is now an
 # assertion rather than a live risk — see the 2026-07-26 note in that file.
-if [[ "$ENGINE" == "claude" && -z "${SKIP_WATCHDOG_PREFLIGHT:-}" ]]; then
+if [[ -z "${SKIP_WATCHDOG_PREFLIGHT:-}" ]]; then
   wrc=0
   WPRE=$(bash "$(dirname "$0")/usage.sh" kill 2>&1 >/dev/null) || wrc=$?
   if [[ "$wrc" -eq 1 ]]; then
@@ -221,8 +231,9 @@ case "$ENGINE" in
     DEBUG_ARGS=()
     [[ -n "${RUN_DEBUG_FILE:-}" ]] && DEBUG_ARGS=(--debug-file "$RUN_DEBUG_FILE")
     CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 \
-    "${SETSID[@]}" "${TCMD[@]}" claude -p "$PROMPT" "${RESUME_ARGS[@]}" \
+    "${SETSID[@]}" "${TCMD[@]}" claude -p "$PROMPT" "${CLAUDE_RESUME_ARGS[@]}" \
       --model "$RESOLVED_MODEL" \
+      --effort "$RUN_EFFORT" \
       --allowedTools "$ALLOW" \
       --disallowedTools "$DISALLOW" \
       --output-format stream-json --verbose \
@@ -231,12 +242,11 @@ case "$ENGINE" in
                           # with a truncate-mode fd claude's buffered writes clobber
                           # appended watchdog lines (this hid the kill reason all day)
     CPID=$!
-    # Usage watchdog: launch-time gating alone let run 4 (2026-07-21) burn the 5h
-    # window to 99%. Re-check the meters every 60s (the endpoint tolerates it fine)
+    # Usage watchdog: launch-time gating alone can let a run overshoot its reserved
+    # headroom. Re-check every minute while the cache policy limits endpoint requests
     # and terminate the run once it exceeds what the gate budgeted for it — the
     # ceilings are derived from the gate's in scripts/budgets.conf, so this can no
     # longer fire on a run the gate just admitted (2026-07-26).
-    # CACHE_MAX_AGE=55 forces a fresh fetch each tick.
     # Only exit code 1 (over ceiling) kills; 3 (meters unknown) never does.
     #
     # `usage.sh kill` asks about USAGE ONLY. The watchdog no longer needs a flag to
@@ -248,7 +258,7 @@ case "$ENGINE" in
       while sleep "${WATCHDOG_INTERVAL:-60}"; do
         kill -0 "$CPID" 2>/dev/null || exit 0
         rc=0
-        WOUT=$(CACHE_MAX_AGE=55 bash "$(dirname "$0")/usage.sh" kill 2>&1 >/dev/null) || rc=$?
+        WOUT=$(bash "$(dirname "$0")/usage.sh" kill 2>&1 >/dev/null) || rc=$?
         if [[ "$rc" -eq 1 ]]; then
           echo "[watchdog $(date +%F-%H:%M)] hard ceiling breached — terminating run: ${WOUT##*$'\n'}" >> "$LOGF"
           kill "$CPID" 2>/dev/null
@@ -263,11 +273,16 @@ case "$ENGINE" in
     ;;
   codex)
     # Headless Codex. JSONL supplies explicit terminal events for the engine-neutral
-    # supervisor. --full-auto retains workspace-write confinement and noninteractive
-    # approvals; benchmark network restrictions remain binding in the harness prompt.
+    # supervisor. --approve-for-me uses automatic approval review with workspace-write
+    # confinement. Benchmark network restrictions remain binding in the harness prompt.
     LOGF="attempts/raw-logs/${STAMP}-codex-${TAG}.log"
-    CODEX_ARGS=(exec --json --full-auto)
+    CODEX_ARGS=(exec --approve-for-me)
     [[ -n "${CODEX_MODEL:-}" ]] && CODEX_ARGS+=(--model "$CODEX_MODEL")
+    if [[ -n "${RESUME_SESSION:-}" ]]; then
+      CODEX_ARGS+=(resume --json "$RESUME_SESSION")
+    else
+      CODEX_ARGS+=(--json)
+    fi
     "${SETSID[@]}" "${TCMD[@]}" codex "${CODEX_ARGS[@]}" "$PROMPT" >> "$LOGF" 2>&1 &
     CPID=$!
     (

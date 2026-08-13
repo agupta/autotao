@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Refresh the usage caches by querying Anthropic's OAuth usage endpoint directly.
+# Refresh usage caches from Anthropic's OAuth usage endpoint. Calls are serialized,
+# throttled, and backed off after rate limits so a TUI refresh loop cannot hammer the
+# endpoint. An interactive Claude status line may update the aggregate legacy cache too.
 # Token is read locally and sent ONLY to api.anthropic.com. Exit 0 on success.
 #
 # Writes TWO files:
@@ -16,17 +18,107 @@ set -euo pipefail
 CRED="$HOME/.claude/.credentials.json"
 LEGACY="$HOME/.claude/rate_limits.json"
 V2="$HOME/.claude/rate_limits_v2.json"
+RETRY_AT_FILE="$HOME/.claude/rate_limits_retry_at"
+LOCK_DIR="$HOME/.claude/rate_limits_fetch.lock"
+MIN_INTERVAL="${FETCH_LIMITS_MIN_INTERVAL:-600}"
+ERROR_BACKOFF="${FETCH_LIMITS_ERROR_BACKOFF:-120}"
 
-TOKEN=$(jq -r '.claudeAiOauth.accessToken // empty' "$CRED" 2>/dev/null)
-[[ -n "$TOKEN" ]] || { echo "no OAuth token in $CRED" >&2; exit 3; }
+[[ "$MIN_INTERVAL" =~ ^[0-9]+$ ]] || { echo "FETCH_LIMITS_MIN_INTERVAL must be a non-negative integer" >&2; exit 2; }
+[[ "$ERROR_BACKOFF" =~ ^[0-9]+$ ]] || { echo "FETCH_LIMITS_ERROR_BACKOFF must be a non-negative integer" >&2; exit 2; }
 
-RESP=$(curl -sf --max-time 15 \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "anthropic-beta: oauth-2025-04-20" \
-  -H "Content-Type: application/json" \
-  "https://api.anthropic.com/api/oauth/usage") || { echo "usage endpoint fetch failed" >&2; exit 4; }
+# The console, launch gate, and watchdog can notice staleness together. Use an atomic
+# directory lock rather than flock(1), which macOS does not ship.
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  HOLDER=$(cat "$LOCK_DIR/pid" 2>/dev/null || true)
+  if [[ -n "$HOLDER" ]] && kill -0 "$HOLDER" 2>/dev/null; then
+    echo "usage refresh already in progress" >&2
+    exit 4
+  fi
+  rm -f "$LOCK_DIR/pid"
+  rmdir "$LOCK_DIR" 2>/dev/null || { echo "usage refresh lock cannot be reclaimed" >&2; exit 4; }
+  mkdir "$LOCK_DIR" || exit 4
+fi
+echo $$ > "$LOCK_DIR/pid"
 
-RESP="$RESP" LEGACY="$LEGACY" V2="$V2" python3 <<'EOF'
+HDR=$(mktemp)
+BODY=$(mktemp)
+cleanup(){
+  rm -f "$HDR" "$BODY" "$LOCK_DIR/pid"
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+NOW=$(date +%s)
+REFRESHED=0
+
+refresh_oauth(){
+  local refresh scopes
+  refresh=$(jq -r '.claudeAiOauth.refreshToken // empty' "$CRED" 2>/dev/null)
+  scopes=$(jq -r '.claudeAiOauth.scopes // [] | join(" ")' "$CRED" 2>/dev/null)
+  [[ -n "$refresh" && -n "$scopes" ]] || {
+    echo "saved Claude OAuth credential cannot be refreshed; run claude auth login" >&2
+    return 1
+  }
+  CLAUDE_CODE_OAUTH_REFRESH_TOKEN="$refresh" CLAUDE_CODE_OAUTH_SCOPES="$scopes" \
+    claude auth login >/dev/null 2>&1 || {
+      echo "Claude OAuth refresh failed; run claude auth login" >&2
+      return 1
+    }
+  REFRESHED=1
+}
+
+EXPIRES_AT=$(jq -r '.claudeAiOauth.expiresAt // 0' "$CRED" 2>/dev/null || echo 0)
+if [[ "$EXPIRES_AT" =~ ^[0-9]+$ ]] && (( EXPIRES_AT > 0 && EXPIRES_AT <= NOW * 1000 + 120000 )); then
+  refresh_oauth || exit 3
+fi
+
+RETRY_AT=$(cat "$RETRY_AT_FILE" 2>/dev/null || echo 0)
+if [[ -z "${FETCH_LIMITS_FORCE:-}" && "$REFRESHED" -eq 0 && "$RETRY_AT" =~ ^[0-9]+$ ]] \
+   && (( RETRY_AT > NOW )); then
+  echo "usage refresh backed off for $(( RETRY_AT - NOW ))s" >&2
+  exit 4
+fi
+
+# Re-check after locking: another caller may have refreshed while this one waited.
+V2_TS=$(jq -r '.ts // 0' "$V2" 2>/dev/null || echo 0)
+LEGACY_TS=$(jq -r '.ts // 0' "$LEGACY" 2>/dev/null || echo 0)
+FRESHEST_TS=${V2_TS%.*}
+(( ${LEGACY_TS%.*} > FRESHEST_TS )) && FRESHEST_TS=${LEGACY_TS%.*}
+if [[ -z "${FETCH_LIMITS_FORCE:-}" ]] && (( NOW - FRESHEST_TS < MIN_INTERVAL )); then
+  echo "usage cache is fresh; endpoint refresh skipped" >&2
+  exit 0
+fi
+
+request_usage(){
+  local token version
+  token=$(jq -r '.claudeAiOauth.accessToken // empty' "$CRED" 2>/dev/null)
+  [[ -n "$token" ]] || { echo "no OAuth token in $CRED" >&2; return 1; }
+  version=$(claude --version 2>/dev/null | awk '{print $1}')
+  : > "$HDR"; : > "$BODY"
+  STATUS=$(curl -sS --max-time 15 -D "$HDR" -o "$BODY" -w '%{http_code}' \
+    -H "Authorization: Bearer $token" \
+    -H "anthropic-beta: oauth-2025-04-20" \
+    -H "Content-Type: application/json" \
+    -H "User-Agent: claude-code/${version:-unknown}" \
+    "https://api.anthropic.com/api/oauth/usage")
+}
+
+request_usage || { echo "usage endpoint fetch failed" >&2; exit 4; }
+
+if [[ "$STATUS" == 401 && "$REFRESHED" -eq 0 ]]; then
+  refresh_oauth || exit 3
+  request_usage || { echo "usage endpoint fetch failed after OAuth refresh" >&2; exit 4; }
+fi
+if [[ "$STATUS" == 429 ]]; then
+  RETRY_AFTER=$(awk 'tolower($1) == "retry-after:" && $2 ~ /^[0-9]+\r?$/ {gsub("\r", "", $2); print $2; exit}' "$HDR")
+  [[ "${RETRY_AFTER:-}" =~ ^[0-9]+$ ]] || RETRY_AFTER=$ERROR_BACKOFF
+  printf '%s\n' "$(( $(date +%s) + RETRY_AFTER ))" > "$RETRY_AT_FILE"
+  echo "usage endpoint rate-limited; retry after ${RETRY_AFTER}s" >&2
+  exit 4
+fi
+[[ "$STATUS" == 200 ]] || { echo "usage endpoint returned HTTP $STATUS" >&2; exit 4; }
+
+RESP="$(<"$BODY")" LEGACY="$LEGACY" V2="$V2" python3 <<'EOF'
 import json, os, time
 resp = json.loads(os.environ["RESP"])
 now = int(time.time())
@@ -107,3 +199,4 @@ legacy = {
 with open(os.environ["LEGACY"], "w") as f: json.dump(legacy, f)
 print(json.dumps(v2))
 EOF
+rm -f "$RETRY_AT_FILE"

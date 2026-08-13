@@ -14,8 +14,10 @@ Format:
 - **model** — the full model id actually used, not an alias.
 - **problem** — the problem slug, or `bench-<slug>` for calibration runs, or
   `SOURCING (harness/formalize.md: <candidate>)`.
-- **target** — the ACTIVE TARGET as stated in the problem file, or `full conjecture`
-  when the iteration went at the conjecture itself.
+- **target** — `A<number> <P|B|F> <target id>: <exact selected statement>` for loop
+  attempts, where `A<number>` is the durable attempt counter and the tier is
+  publishable-rung, decisive-bottleneck, or full-conjecture. Legacy rows may contain only
+  the ACTIVE TARGET or `full conjecture`.
 - **hours** — wall-clock, approximate is fine. Mark killed runs `~N (killed)`.
 - **outcome** — one of the vocabulary below, followed by a parenthesized account. Be
   specific enough that a future iteration can salvage from it without re-reading the raw
@@ -28,7 +30,7 @@ Format:
 
 | outcome | means |
 |---|---|
-| `resolved` | ACTIVE TARGET met, verification artifact passes, audits clean |
+| `resolved` | SELECTED TARGET met, verification artifact passes, audits clean |
 | `resolved-pending-audit` | target met and verified in-run, cross-model or human audit outstanding |
 | `partial` | real progress on the target, machine-checked, target not met |
 | `fragment` | no target progress, but a rigorous reusable piece — a lemma, a bound, an eliminated approach |

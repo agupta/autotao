@@ -1,6 +1,8 @@
 # <Problem name>
 
-status-checked <YYYY-MM-DD> (web) · verification load: `mechanical` | `elementary-readable` | `needs-expert`
+status-checked <YYYY-MM-DD> (web) · credit-checked <YYYY-MM-DD> (web)
+verification load: `mechanical` | `elementary-readable` | `needs-expert`
+research shape: `proof-shaped` | `construction-shaped` | `computation-shaped`
 track: A (proof-shaped) | B (certificate-shaped) | A+B · rubric score: <n>/12
 
 ## IN PLAIN TERMS
@@ -39,19 +41,25 @@ was checked.
   themselves rediscovering it. Name the paper and the bound.
 - Believed direction, and why. Is the consensus based on evidence or on aesthetics?
 
+### Credit / preemption ledger
+
+List every credible current claim with date, author, inspectable artifact, exact theorem
+scope, and review status. Write `CLEAR`, `PENDING REVIEW`, `PREEMPTED`, or `PARKED`
+explicitly. Officially open is not the same as safe to race.
+
 ## NAMED TARGETS
 
-2–4 statements one notch below the full conjecture. Each should be something that would
-have been a standalone publication two years ago. Mark each `proof-shaped` or
-`certificate-shaped`, and designate exactly one as the `ACTIVE TARGET`.
+Define a real difficulty ladder. Designate exactly one scoped theorem as the `ACTIVE
+TARGET` / `publishable-rung`, add an honest `decisive-bottleneck` when one exists, and
+state the exact `full-conjecture`. Mark each proof-, construction-, or certificate-shaped.
 
-- **T1 (ACTIVE TARGET)** — <statement>. `certificate-shaped`.
-- **T2** — <statement>. `proof-shaped`.
-- **T3** — <statement>. Gated on <dependency, e.g. an unobtained paper>.
+- **T1 (ACTIVE TARGET; publishable-rung)** — <statement>. `proof-shaped`.
+- **T2 (decisive-bottleneck)** — <strictly stronger natural statement>. `proof-shaped`.
+- **FULL (full-conjecture)** — <exact conjecture>. Gated on <dependency, if any>.
 
-The ACTIVE TARGET is what the absolutist harness prompt gets pointed at. Choosing it well
-is most of the operator's job: too ambitious and every run fails, too easy and the result
-isn't publishable.
+The loop's scheduled tier selects one of these targets for each run. Choosing the ladder
+well is most of the operator's job: too ambitious and every run fails, too easy and the
+result is not publishable.
 
 ## ADVERSARIAL CHECKLIST
 
@@ -83,11 +91,11 @@ Six scores from `criteria.md`, each with a one-line justification, and the total
 | # | Feature | Score | Why |
 |---|---------|-------|-----|
 | 1 | Elementary formalizability | 0–2 | |
-| 2 | Verification asymmetry | 0–2 | |
+| 2 | Verification tractability | 0–2 | |
 | 3 | Near-miss / active-program literature | 0–2 | |
 | 4 | Approach diversity | 0–2 | |
 | 5 | Under-searched direction | 0–2 | |
-| 6 | Referee-ready venue | 0–2 | |
+| 6 | Referee-ready contribution | 0–2 | |
 | | **Total** | **/12** | |
 
 Below 8/12, the problem does not get a file.

@@ -7,7 +7,10 @@ order, then stop; the outer loop relaunches you.
 ## 1. Orient (5 minutes)
 
 Read `attempts/LOG.md`, `problems/INDEX.md`, and `LOOP_STATE.md` (create it if missing:
-it holds `iteration: N`, `last_problem: <slug>`, `sourcing_counter: k`).
+it holds `iteration: N`, `attempt_counter: A`, `last_problem: <slug>`, and
+`sourcing_counter: k`). `attempt_counter` counts ATTEMPT iterations that selected a
+mathematical target, including later failures or killed runs; SOURCING does not increment
+it. Reconcile it from the denominator before selecting this run.
 
 Reconcile orphans: runs can be killed by a wall-time cap, so if `attempts/raw-logs/`
 or `attempts/` contains evidence of a prior run with no matching `LOG.md` line, append
@@ -23,20 +26,54 @@ rigorous from its artifact dir into the relevant problem file's notes before mov
   scoring ≥ 8 on criteria.md). Deliverable: a new `problems/<slug>.md` + INDEX row.
   This is how genuinely NEW problems keep entering the portfolio. Skip to step 5.
 - Otherwise this is an **ATTEMPT iteration** (increment sourcing_counter):
-  **If `LOOP_STATE.md` has a `priority:` list, take the first entry whose ACTIVE target
-  is not yet resolved and does not already have 2+ consecutive dead `failed` runs — this
-  overrides rotation and lets a human steer the queue.** Otherwise pick the next problem
-  in INDEX rotation after `last_problem`. Either way, skip any problem whose ACTIVE
-  target already has 2+ consecutive `failed` runs with no new angle noted in its problem
-  file (park it; note the parking in LOG.md). Every 5th attempt iteration, target the
-  FULL conjecture instead of the ACTIVE target — but priority-queue entries are always
-  attempted at their ACTIVE target.
-- Before attempting: spend ≤ 10 minutes re-verifying the problem is still open (one
-  web check of the problem's main citation trail). If it got solved: mark the file
-  SOLVED, log, and pick the next problem instead. **Skip this check entirely if the
-  problem file already records a web-verified status ≤ 7 days old** (a `status-checked
-  <date> (web)` line) — re-querying arXiv every single iteration is not worth the
-  cost.
+  first exclude problems marked `PENDING REVIEW` or `PARKED` and targets marked
+  `PREEMPTED`. These states outrank rotation and all operator directives.
+
+  If `LOOP_STATE.md` has `next_problem:`, take it and remove the line when updating state.
+  Otherwise, a non-empty `priority:` list supplies the first eligible problem and
+  overrides problem rotation. A directive may pin an exact target as `slug@Tn`; only that
+  form overrides the ambition schedule. Otherwise pick the next eligible problem in INDEX
+  rotation after `last_problem`.
+
+  Let `A = attempt_counter + 1` and choose the ambition tier from this repeating schedule:
+
+  `P, P, B, P, F, B, P, B, P, F`
+
+  `P` is the eligible `publishable-rung` / ACTIVE TARGET, `B` an eligible
+  `decisive-bottleneck`, and `F` the exact `full-conjecture`. Thus ten attempts allocate
+  50% / 30% / 20% while retaining a full-conjecture run every fifth attempt. For legacy
+  problem files without tier labels, `B` is the strongest natural non-full target that
+  strictly subsumes ACTIVE or closes a recognized central obstruction. Never promote a
+  merely larger numerical bound to `B`. If a problem has no honest target in the scheduled
+  tier, continue rotation until one does; preserve the tier rather than silently
+  downgrading it. Record `A`, tier, and exact target in state and LOG. Increment
+  `attempt_counter` exactly once when closing the iteration; orphan reconciliation supplies
+  a missing increment for a prior run that already selected a target.
+
+  Skip a selected target after 2+ consecutive dead `failed` runs with no new angle in its
+  problem file; park it and record why. If `research_mode: proof-first`, also skip targets
+  whose main route is exhaustive enumeration, SAT/CP sweeps, or large-scale computation.
+  Computation may falsify lemmas and verify finite seams, but must not be the main
+  contribution unless the operator explicitly selects a computation-shaped target.
+
+- Before attempting, run two separate checks:
+
+  1. **Official-status refresh:** spend ≤ 10 minutes re-verifying the problem is still
+     open. This may be skipped when a web-verified status line is ≤ 7 days old.
+  2. **Credit/preemption collision check: never skip this.** Re-open the live primary
+     problem page, inspect new proof/formal-proof/formalisation/AI-attempt/comment/history
+     links, and search the exact selected target with `proof`, `preprint`, `Lean`, and
+     `Coq`. Open artifacts and compare theorem statements.
+
+  If a credible full proof or disproof awaits independent review, mark the problem
+  `PENDING REVIEW`, park it, log the collision, and rotate. If a credible result covers
+  the selected partial, mark that target `PREEMPTED` and choose a demonstrably
+  non-overlapping one or rotate. An unread likely prior-art artifact blocks the run.
+  `PENDING REVIEW` is a credit-risk label, not a declaration that the claim is correct;
+  record separately whether statement fidelity, build/kernel checks, assumptions, and
+  independent human review have actually been checked.
+
+  If official status changed to solved, mark the file SOLVED, log it, and rotate.
 
   **You have WebFetch and WebSearch on a live run** (2026-07-25). They are blocked
   only for `bench-*` calibration runs, where the published solution would
@@ -55,7 +92,8 @@ rigorous from its artifact dir into the relevant problem file's notes before mov
   **If you cannot get a paper, flag it — never diagnose the source.**
   `scripts/want-paper.sh <ref> "why you need it"` records it in
   `papers/WANTED.md`, which the supervision console shows until an operator
-  fetches it. Then state the gap in your RESULT.md and carry on. A run that
+  fetches it. If it may contain a result overlapping the selected target, rotate;
+  otherwise state the gap in RESULT.md and carry on. A run that
   cannot reach the network is describing its own sandbox, not the internet:
   writing "the arXiv API is dead" into a problem file is a claim about the world
   made from inside a box, and it stood uncorrected here for two days.
@@ -115,9 +153,15 @@ finished mathematics on disk and nothing shipped; iterations 21 and 26 each burn
 a full run recovering the wreckage instead of advancing the target. Do not add to
 that list.
 
+Any search or verifier that may exceed 512 MB, one minute, or a bounded in-memory state
+space must follow the selected track harness's heavy-computation survival contract and run
+through `scripts/safe-compute.sh`. A full verifier is not exempt. One bounded child may
+fail; the already-shipped root iteration must survive and record the unverified seam.
+
 ## 5. Update state & commit
 
-Update `LOOP_STATE.md` (iteration++, last_problem, sourcing_counter). Commit
+Update `LOOP_STATE.md` (iteration++, attempt_counter when applicable, last_problem,
+sourcing_counter, and consumed one-shot directive). Commit
 locally with **`bash scripts/commit-attempt.sh "loop iter N: <one-line outcome>"`**
 — not `git add -A`, and not `git commit` by hand.
 
